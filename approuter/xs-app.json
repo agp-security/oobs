@@ -1,0 +1,34 @@
+{
+  "welcomeFile": "/ui/index.html",
+  "authenticationMethod": "route",
+  "sessionTimeout": 30,
+  "routes": [
+    {
+      "source": "^/api/v1/health$",
+      "target": "/api/v1/health",
+      "destination": "srv",
+      "authenticationType": "none",
+      "csrfProtection": false
+    },
+    {
+      "source": "^/api/(.*)$",
+      "target": "/api/$1",
+      "destination": "srv",
+      "authenticationType": "xsuaa",
+      "csrfProtection": true,
+      "scope": [
+        "$XSAPPNAME.btpc.admin",
+        "$XSAPPNAME.btpc.responder",
+        "$XSAPPNAME.btpc.sod_viewer",
+        "$XSAPPNAME.btpc.viewer"
+      ]
+    },
+    {
+      "source": "^/(ui/.*|favicon\\.svg|favicon\\.ico|index\\.html)$",
+      "target": "/$1",
+      "localDir": "resources",
+      "authenticationType": "xsuaa",
+      "cacheControl": "public, max-age=300"
+    }
+  ]
+}

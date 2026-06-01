@@ -1,0 +1,76 @@
+<!--
+  SPDX-License-Identifier: AGPL-3.0-only
+  Copyright 2026 Jan-Luca Gruber
+-->
+<core:FragmentDefinition
+    xmlns="sap.m"
+    xmlns:l="sap.ui.layout"
+    xmlns:core="sap.ui.core">
+
+    <Dialog title="{i18n>dlgProtectTitle}" contentWidth="40rem">
+        <content>
+            <l:VerticalLayout width="100%" class="sapUiContentPadding">
+
+                <Label text="Scope" required="true"/>
+                <!-- onProtectScopeChange pre-fills the matching id when the
+                     operator flips to Subaccount or IAS Tenant. Without it
+                     the Select renders the first item visually but the
+                     bound key stays null, so onConfirmAddProtection
+                     errors with "Pick a subaccount" even though one
+                     appears selected on screen. -->
+                <RadioButtonGroup selectedIndex="{protect>/scopeIndex}" columns="1"
+                                  select=".onProtectScopeChange">
+                    <buttons>
+                        <RadioButton text="{i18n>plScopeGlobal}"/>
+                        <RadioButton text="{i18n>plScopeSubaccount}"/>
+                        <RadioButton text="{i18n>plScopeIasTenant}"/>
+                    </buttons>
+                </RadioButtonGroup>
+
+                <Label text="{i18n>plSubaccountPicker}" required="true"
+                       visible="{= ${protect>/scopeIndex} === 1 }"
+                       class="sapUiTinyMarginTop"/>
+                <Select items="{data>/subaccounts}"
+                        selectedKey="{protect>/subaccountId}"
+                        forceSelection="false"
+                        visible="{= ${protect>/scopeIndex} === 1 }"
+                        width="100%">
+                    <core:Item key="{data>id}" text="{data>cisDisplayName} ({data>region})"/>
+                </Select>
+
+                <Label text="{i18n>plIasTenantPicker}" required="true"
+                       visible="{= ${protect>/scopeIndex} === 2 }"
+                       class="sapUiTinyMarginTop"/>
+                <Select items="{iasTenants>/list}"
+                        selectedKey="{protect>/iasTenantId}"
+                        forceSelection="false"
+                        visible="{= ${protect>/scopeIndex} === 2 }"
+                        width="100%">
+                    <core:Item key="{iasTenants>id}"
+                               text="{iasTenants>displayName} ({iasTenants>iasHost})"/>
+                </Select>
+
+                <Label text="{i18n>plEmail}" required="true" class="sapUiSmallMarginTop"/>
+                <Input value="{protect>/userEmail}" placeholder="user@example.com"/>
+
+                <Label text="{i18n>plReason}" required="true" class="sapUiSmallMarginTop"/>
+                <Input value="{protect>/reason}" placeholder="why this user must never be contained"/>
+
+                <Label text="{i18n>plExpires}" class="sapUiSmallMarginTop"/>
+                <!-- DateTimePicker emits ISO-8601 with the trailing Z so the
+                     server-side OffsetDateTime.parse accepts the string
+                     directly. Empty value = "no expiry" (protection never
+                     auto-disables). -->
+                <DateTimePicker value="{protect>/expiresAt}"
+                                valueFormat="yyyy-MM-dd'T'HH:mm:ss'Z'"
+                                displayFormat="yyyy-MM-dd HH:mm"
+                                placeholder="leave empty for no expiry"
+                                width="100%"/>
+            </l:VerticalLayout>
+        </content>
+        <buttons>
+            <Button text="{i18n>btnConfirmProtect}" type="Emphasized" press=".onConfirmAddProtection"/>
+            <Button text="{i18n>btnCancelProtect}" press=".onCancelAddProtection"/>
+        </buttons>
+    </Dialog>
+</core:FragmentDefinition>

@@ -1,0 +1,174 @@
+<!--
+  SPDX-License-Identifier: AGPL-3.0-only
+  Copyright 2026 Jan-Luca Gruber
+-->
+<core:FragmentDefinition
+    xmlns="sap.m"
+    xmlns:l="sap.ui.layout"
+    xmlns:core="sap.ui.core">
+
+    <Dialog title="{i18n>dlgEnrollTitle}" contentWidth="56rem" stretchOnPhone="true">
+        <content>
+            <l:VerticalLayout width="100%" class="sapUiContentPadding">
+
+                <SegmentedButton selectedKey="{enroll>/mode}" selectionChange=".onEnrollModeChange" width="100%">
+                    <items>
+                        <SegmentedButtonItem key="pending"
+                                             text="{= 'From sync (' + ${enroll>/candidates}.length + ')' }"
+                                             icon="sap-icon://world"/>
+                        <SegmentedButtonItem key="discover" text="{i18n>modeDiscover}" icon="sap-icon://search"/>
+                        <SegmentedButtonItem key="manual"   text="{i18n>modeManual}"   icon="sap-icon://add-document"/>
+                    </items>
+                </SegmentedButton>
+
+                <!-- ===================== FROM SYNC (pending candidates) ===================== -->
+                <l:VerticalLayout visible="{= ${enroll>/mode} === 'pending' }" width="100%" class="sapUiSmallMarginTop">
+                    <MessageStrip text="{i18n>pendingPanelHint}" type="Information" showIcon="true"/>
+
+                    <HBox class="sapUiSmallMarginTop">
+                        <SearchField width="20rem" placeholder="{i18n>filterPlaceholder}"
+                                     liveChange=".onPendingFilterChange"/>
+                        <ToolbarSpacer/>
+                        <Button text="{i18n>btnRefresh}" icon="sap-icon://refresh"
+                                press=".onRefreshPending"/>
+                    </HBox>
+
+                    <Table id="enrollPendingTable" items="{enroll>/candidates}"
+                           mode="MultiSelect" includeItemInSelection="true"
+                           fixedLayout="false" popinLayout="GridLarge"
+                           growing="true" growingThreshold="50"
+                           noDataText="{i18n>pendingEmpty}">
+                        <columns>
+                            <Column><Text text="{i18n>colCandidateSubaccount}"/></Column>
+                            <Column minScreenWidth="Tablet" demandPopin="true"><Text text="{i18n>colCandidateRegion}"/></Column>
+                            <Column minScreenWidth="Tablet" demandPopin="true"><Text text="{i18n>colGaName}"/></Column>
+                            <Column minScreenWidth="Desktop" demandPopin="true"><Text text="{i18n>colCandidateState}"/></Column>
+                            <Column minScreenWidth="Desktop" demandPopin="true"><Text text="{i18n>colCandidateDiscovered}"/></Column>
+                        </columns>
+                        <items>
+                            <ColumnListItem>
+                                <cells>
+                                    <VBox>
+                                        <Text text="{enroll>displayName}"/>
+                                        <Text text="{enroll>subaccountGuid}" class="sapUiTinyMarginTop"/>
+                                    </VBox>
+                                    <Text text="{enroll>region}"/>
+                                    <Text text="{enroll>globalAccountGuid}"/>
+                                    <ObjectStatus text="{enroll>state}"
+                                                  state="{= ${enroll>state} === 'OK' ? 'Success' : 'Warning' }"/>
+                                    <Text text="{enroll>discoveredAt}"/>
+                                </cells>
+                            </ColumnListItem>
+                        </items>
+                    </Table>
+
+                    <HBox class="sapUiSmallMarginTop">
+                        <Button text="{i18n>btnBulkEnroll}" icon="sap-icon://add"
+                                type="Emphasized" press=".onBulkEnrollPending"/>
+                        <!-- Bulk dismiss removed (V12). Promotable list is derived;
+                             unwanted rows simply stay until enrolled or hard-deleted. -->
+                    </HBox>
+                </l:VerticalLayout>
+
+                <!-- ===================== DISCOVER (ad-hoc paste) ===================== -->
+                <l:VerticalLayout visible="{= ${enroll>/mode} === 'discover' }" width="100%" class="sapUiSmallMarginTop">
+                    <MessageStrip text="{i18n>discoverPanelHint}" type="Information" showIcon="true"/>
+
+                    <Label text="{i18n>lblPasteCentralKey}" class="sapUiSmallMarginTop"/>
+                    <TextArea id="enrollKey1Discover" value="{enroll>/key1}" rows="6" width="100%"
+                              placeholder="{i18n>keyPlaceholderCisCentral}"
+                              liveChange=".onKey1Change"/>
+                    <Text text="{enroll>/key1Validation}" class="sapUiTinyMarginTop"/>
+
+                    <CheckBox text="{i18n>lblSaveKey}"
+                              selected="{enroll>/saveKey}"
+                              visible="{= !!${enroll>/key1} }"
+                              class="sapUiSmallMarginTop"/>
+                    <HBox visible="{= ${enroll>/saveKey} }" class="sapUiSmallMarginTop">
+                        <Label text="{i18n>lblSyncInterval}" labelFor="enrollSaveInterval"/>
+                        <Input id="enrollSaveInterval" value="{enroll>/saveIntervalMinutes}" width="6rem" type="Number"
+                               class="sapUiSmallMarginBegin"/>
+                        <Text text="{i18n>lblSyncMinutes}" class="sapUiTinyMarginTop sapUiSmallMarginBegin"/>
+                    </HBox>
+
+                    <Button text="{i18n>btnDiscover}" icon="sap-icon://search"
+                            press=".onDiscoverCis" type="Emphasized"
+                            tooltip="{i18n>btnDiscoverTooltip}" class="sapUiSmallMarginTop"/>
+                    <Text text="{enroll>/discoveryHint}" class="sapUiTinyMarginTop"/>
+
+                    <Table id="enrollDiscoverTable" items="{enroll>/discoverCandidates}"
+                           mode="MultiSelect" includeItemInSelection="true"
+                           visible="{= ${enroll>/discoverCandidates}.length &gt; 0 }"
+                           fixedLayout="false" popinLayout="GridLarge"
+                           growing="true" growingThreshold="50"
+                           class="sapUiSmallMarginTop">
+                        <columns>
+                            <Column><Text text="{i18n>colCandidateSubaccount}"/></Column>
+                            <Column minScreenWidth="Tablet" demandPopin="true"><Text text="{i18n>colCandidateRegion}"/></Column>
+                            <Column minScreenWidth="Tablet" demandPopin="true"><Text text="{i18n>colGaName}"/></Column>
+                            <Column minScreenWidth="Desktop" demandPopin="true"><Text text="{i18n>colCandidateState}"/></Column>
+                        </columns>
+                        <items>
+                            <ColumnListItem>
+                                <cells>
+                                    <VBox>
+                                        <Text text="{enroll>displayName}"/>
+                                        <Text text="{enroll>guid}" class="sapUiTinyMarginTop"/>
+                                    </VBox>
+                                    <Text text="{enroll>region}"/>
+                                    <Text text="{enroll>globalAccountGuid}"/>
+                                    <ObjectStatus text="{enroll>state}"
+                                                  state="{= ${enroll>state} === 'OK' ? 'Success' : 'Warning' }"/>
+                                </cells>
+                            </ColumnListItem>
+                        </items>
+                    </Table>
+
+                    <HBox class="sapUiSmallMarginTop"
+                          visible="{= ${enroll>/discoverCandidates}.length &gt; 0 }">
+                        <Button text="{i18n>btnBulkEnroll}" icon="sap-icon://add"
+                                type="Emphasized" press=".onBulkEnrollDiscover"/>
+                    </HBox>
+                </l:VerticalLayout>
+
+                <!-- ===================== MANUAL ENTRY ===================== -->
+                <l:VerticalLayout visible="{= ${enroll>/mode} === 'manual' }" width="100%" class="sapUiSmallMarginTop">
+                    <MessageStrip text="{i18n>manualPanelHint}" type="Warning" showIcon="true"/>
+
+                    <Label text="{i18n>lblName}" required="true" class="sapUiSmallMarginTop"/>
+                    <Input value="{enroll>/quickName}" placeholder="{i18n>lblNameHint}"/>
+
+                    <Label text="{i18n>lblSubGuid}" required="true" class="sapUiSmallMarginTop"/>
+                    <Input value="{enroll>/quickGuid}" placeholder="{i18n>lblSubGuidHint}"/>
+
+                    <Label text="{i18n>lblRegion}" required="true" class="sapUiSmallMarginTop"/>
+                    <Input value="{enroll>/quickRegion}" placeholder="{i18n>lblRegionHint}" width="10rem"/>
+
+                    <Label text="{i18n>lblGaName}" class="sapUiSmallMarginTop"/>
+                    <Input value="{enroll>/globalAccountName}" placeholder="{i18n>lblGaNameHint}"/>
+
+                    <Label text="{i18n>lblGaId}" class="sapUiSmallMarginTop"/>
+                    <Input value="{enroll>/globalAccountId}" placeholder="{i18n>lblGaIdHint}"/>
+
+                    <Label text="{i18n>lblStage}" class="sapUiSmallMarginTop"/>
+                    <Select selectedKey="{enroll>/stage}" width="10rem" forceSelection="false">
+                        <core:Item key=""     text="(none)"/>
+                        <core:Item key="prod" text="prod"/>
+                        <core:Item key="dev"  text="dev"/>
+                        <core:Item key="qa"   text="qa"/>
+                        <core:Item key="test" text="test"/>
+                    </Select>
+
+                    <Label text="{i18n>lblLabel}" class="sapUiSmallMarginTop"/>
+                    <Input value="{enroll>/label}" placeholder="{i18n>lblLabelHint}"/>
+
+                    <Button text="{i18n>dlgEnrollSubmit}" icon="sap-icon://add" type="Emphasized"
+                            press=".onConfirmManualEnroll" class="sapUiSmallMarginTop"/>
+                </l:VerticalLayout>
+            </l:VerticalLayout>
+        </content>
+        <buttons>
+            <Button text="{i18n>dlgEnrollCancel}" press=".onCancelEnroll"/>
+        </buttons>
+    </Dialog>
+</core:FragmentDefinition>

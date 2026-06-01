@@ -1,0 +1,28 @@
+spring:
+  application:
+    name: btp-containment
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+  flyway:
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    baseline-version: 0
+
+server:
+  port: ${PORT:8080}
+  forward-headers-strategy: framework
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: ""
+  endpoint:
+    health:
+      show-details: never
+btpc:
+  version: 1.0.0-rc
+  dev-auth:
+    enabled: false

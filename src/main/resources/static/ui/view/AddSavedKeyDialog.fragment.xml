@@ -1,0 +1,36 @@
+<!--
+  SPDX-License-Identifier: AGPL-3.0-only
+  Copyright 2026 Jan-Luca Gruber
+-->
+<core:FragmentDefinition
+    xmlns="sap.m"
+    xmlns:l="sap.ui.layout"
+    xmlns:core="sap.ui.core">
+
+    <Dialog title="{i18n>dlgAddSavedKeyTitle}" contentWidth="40rem" stretchOnPhone="true">
+        <content>
+            <l:VerticalLayout width="100%" class="sapUiContentPadding">
+                <MessageStrip text="{i18n>addKeyPasteHint}" type="Information" showIcon="true"/>
+
+                <TextArea value="{addKey>/serviceKey}" rows="8" width="100%"
+                          placeholder="{i18n>keyPlaceholderCisCentral}"
+                          liveChange=".onAddSavedKeyChange"
+                          class="sapUiSmallMarginTop"/>
+                <Text text="{addKey>/validation}" class="sapUiTinyMarginTop"/>
+
+                <Label text="{i18n>addKeyLabel}" class="sapUiSmallMarginTop"/>
+                <Input value="{addKey>/label}" placeholder="{i18n>addKeyLabelHint}"/>
+
+                <Label text="{i18n>addKeyInterval}" class="sapUiSmallMarginTop"/>
+                <Input value="{addKey>/syncIntervalMinutes}" type="Number" width="10rem"/>
+
+                <CheckBox text="{i18n>addKeyEnabled}" selected="{addKey>/syncEnabled}"
+                          class="sapUiSmallMarginTop"/>
+            </l:VerticalLayout>
+        </content>
+        <buttons>
+            <Button text="{i18n>btnAddSavedKeySave}" type="Emphasized" press=".onConfirmAddSavedKey"/>
+            <Button text="{i18n>btnAddSavedKeyCancel}" press=".onCancelAddSavedKey"/>
+        </buttons>
+    </Dialog>
+</core:FragmentDefinition>

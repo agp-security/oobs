@@ -1,0 +1,1782 @@
+<!--
+  SPDX-License-Identifier: AGPL-3.0-only
+  Copyright 2026 Jan-Luca Gruber
+-->
+<mvc:View
+    controllerName="btpc.controller.App"
+    xmlns="sap.m"
+    xmlns:mvc="sap.ui.core.mvc"
+    xmlns:core="sap.ui.core"
+    xmlns:f="sap.f"
+    xmlns:tnt="sap.tnt"
+    xmlns:mc="sap.suite.ui.microchart"
+    displayBlock="true">
+
+    <App id="app">
+        <tnt:ToolPage id="toolPage">
+            <tnt:header>
+                <f:ShellBar
+                    title="{i18n>appTitle}"
+                    secondTitle="{i18n>appShellSubtitle}"
+                    homeIcon="/favicon.svg"
+                    showCopilot="false"
+                    showSearch="false"
+                    showNotifications="false"
+                    showProductSwitcher="false"
+                    showMenuButton="false"
+                    avatarPressed=".onAvatarPressed"
+                    homeIconPressed=".onHomePressed">
+                    <f:profile>
+                        <!-- displaySize="S" (not XS): the XS avatar was nearly
+                             invisible against the ShellBar background in
+                             local-profile dev runs where the chip is the
+                             only interactive thing besides the home icon. -->
+                        <Avatar initials="{shell>/initials}" displaySize="S"
+                                backgroundColor="Accent6"
+                                tooltip="{i18n>shellAvatarTooltip}"/>
+                    </f:profile>
+                    <!-- f:additionalContent only accepts controls implementing
+                         sap.f.IShellBar (sap.m.Button does NOT). The settings
+                         + about buttons that lived here threw an assertion
+                         failure that short-circuited rendering. The avatar's
+                         UserMenu popover (Settings / About / Logout) is the
+                         canonical entry point in this shell. -->
+                </f:ShellBar>
+            </tnt:header>
+
+            <tnt:sideContent>
+                <tnt:SideNavigation id="sideNav" itemSelect=".onNavItemSelect" expanded="true">
+                    <!-- Side-nav visibility is scope-driven. Containment +
+                         Logs + Subaccounts (read) are visible to any role.
+                         IAS Tenants / Discovery / Certificates / Admin are
+                         admin-only. Risk is sod_viewer-or-admin. Protected
+                         is visible to responder (read who's protected before
+                         attempting to lock) + admin (who manages the list). -->
+                    <tnt:NavigationList selectedKey="subaccounts">
+                        <tnt:NavigationListItem text="{i18n>tabSubaccounts}"
+                                                icon="sap-icon://building" key="subaccounts"
+                                                visible="{shell>/isViewer}"/>
+                        <tnt:NavigationListItem text="{i18n>tabIasTenants}"
+                                                icon="sap-icon://locked" key="iasTenants"
+                                                visible="{shell>/isAdmin}"/>
+                        <tnt:NavigationListItem text="{i18n>tabContainment}"
+                                                icon="sap-icon://shield" key="containment"
+                                                visible="{shell>/isResponder}"/>
+                        <tnt:NavigationListItem text="{i18n>tabUserAnalysis}"
+                                                icon="sap-icon://person-placeholder" key="userAnalysis"
+                                                visible="{shell>/isResponder}"/>
+                        <tnt:NavigationListItem text="{i18n>tabHealth}"
+                                                icon="sap-icon://stethoscope" key="health"
+                                                visible="{shell>/isAdmin}"/>
+                        <tnt:NavigationListItem text="{i18n>tabRisk}"
+                                                icon="sap-icon://compare" key="sod"
+                                                visible="{shell>/isSodViewer}"/>
+                        <tnt:NavigationListItem text="{i18n>tabProtected}"
+                                                icon="sap-icon://employee-rejections" key="protected"
+                                                visible="{= ${shell>/isResponder} || ${shell>/isAdmin} }"/>
+                        <tnt:NavigationListItem text="{i18n>tabDiscovery}"
+                                                icon="sap-icon://world" key="discovery"
+                                                visible="{shell>/isAdmin}"/>
+                        <tnt:NavigationListItem text="{i18n>tabLogs}"
+                                                icon="sap-icon://history" key="logs"
+                                                visible="{shell>/isViewer}"/>
+                        <tnt:NavigationListItem text="{i18n>tabCertificates}"
+                                                icon="sap-icon://locked" key="certificates"
+                                                visible="{shell>/isAdmin}"/>
+                        <tnt:NavigationListItem text="{i18n>tabAdmin}"
+                                                icon="sap-icon://it-system" key="admin"
+                                                visible="{shell>/isAdmin}"/>
+                    </tnt:NavigationList>
+                </tnt:SideNavigation>
+            </tnt:sideContent>
+
+            <tnt:mainContents>
+                <!-- One outer sap.m.Page provides the height + native vertical
+                     scroll. Each section is a visible-bound VBox driven by
+                     {nav>/currentPage}; only the matching one renders.
+                     Simpler than NavContainer (which uses absolute-positioned
+                     pages that need a definite parent height to display) and
+                     simpler than IconTabBar with a hidden tab strip. -->
+                <Page id="mainPage" showHeader="false" enableScrolling="true" class="btpcMainArea">
+                    <VBox>
+            <!-- KPI strip: one tile per sidebar destination. Clicking a tile
+                 navigates AND syncs the SideNavigation selected mark, so the
+                 tile and the side nav are always in lockstep. Inputs unchanged. -->
+            <HBox justifyContent="Start" wrap="Wrap"
+                  class="sapUiSmallMarginBegin sapUiSmallMarginTop sapUiSmallMarginEnd btpcKpiStrip">
+                <!-- Subaccounts tile: NumericContent only. The cumulative line
+                     chart used to live here but it just showed a flat steady
+                     count for most operators (no day-to-day churn), so the
+                     chart hid the headline number behind a redundant line.
+                     Back to a single big count - same shape as the IAS /
+                     Risk / Protections tiles. -->
+                <GenericTile class="sapUiTinyMarginEnd sapUiTinyMarginBottom btpcKpiTile"
+                             header="{i18n>kpiSubaccounts}"
+                             subheader="{= ${data>/subaccounts}.length + ' enrolled' }"
+                             frameType="OneByOne" press=".onKpiPress('subaccounts')">
+                    <tileContent>
+                        <TileContent footer="{i18n>kpiSubaccountsFooter}">
+                            <content>
+                                <NumericContent value="{= ${data>/subaccounts}.length }"
+                                                icon="sap-icon://building" valueColor="Good"/>
+                            </content>
+                        </TileContent>
+                    </tileContent>
+                </GenericTile>
+                <GenericTile class="sapUiTinyMarginEnd sapUiTinyMarginBottom btpcKpiTile"
+                             header="{i18n>kpiIasTenants}"
+                             subheader="{= ${iasTenants>/list}.length + ' registered' }"
+                             frameType="OneByOne" press=".onKpiPress('iasTenants')">
+                    <tileContent>
+                        <TileContent footer="{i18n>kpiIasTenantsFooter}">
+                            <content>
+                                <NumericContent value="{= ${iasTenants>/list}.length }"
+                                                icon="sap-icon://locked" valueColor="Neutral"/>
+                            </content>
+                        </TileContent>
+                    </tileContent>
+                </GenericTile>
+                <!-- Containment Activity tile uses TwoByOne so the 14-day
+                     lock/unlock sparkline has room to render alongside the
+                     count. Sparkline data comes from trends>/containmentTrend
+                     (computed in App.controller.js::_computeTrends). -->
+                <GenericTile class="sapUiTinyMarginEnd sapUiTinyMarginBottom btpcKpiTileWide"
+                             header="{i18n>kpiContainments}"
+                             subheader="{= ${kpis>/recentContainmentCount} === 0 ? 'no activity (14d)' : (${kpis>/recentContainmentCount} + ' actions (14d)') }"
+                             frameType="TwoByOne" press=".onKpiPress('containment')">
+                    <tileContent>
+                        <!-- No footer text on the activity tiles: the chart
+                             needs the vertical room, and the subheader
+                             already carries the count + window. -->
+                        <TileContent>
+                            <content>
+                                <!-- 14-day column chart: one bar per day, zero
+                                     days included so the cadence matches
+                                     calendar time. ColumnMicroChartData reads
+                                     `label` + `value` off each trend point.
+                                     height pinned so tall bars don't push
+                                     into the tile header/footer chrome. -->
+                                <mc:ColumnMicroChart allowColumnLabels="false"
+                                                     height="4rem" width="100%"
+                                                     columns="{trends>/containmentTrend}">
+                                    <mc:columns>
+                                        <mc:ColumnMicroChartData label="{trends>label}"
+                                                                 value="{trends>value}"
+                                                                 color="Good"/>
+                                    </mc:columns>
+                                </mc:ColumnMicroChart>
+                            </content>
+                        </TileContent>
+                    </tileContent>
+                </GenericTile>
+                <GenericTile class="sapUiTinyMarginEnd sapUiTinyMarginBottom btpcKpiTile"
+                             header="{i18n>kpiRisk}"
+                             subheader="{= ${kpis>/conflictSetCount} + ' rules enabled' }"
+                             frameType="OneByOne" press=".onKpiPress('sod')">
+                    <tileContent>
+                        <TileContent footer="{i18n>kpiRiskFooter}">
+                            <content>
+                                <NumericContent value="{kpis>/conflictSetCount}"
+                                                icon="sap-icon://compare" valueColor="Neutral"/>
+                            </content>
+                        </TileContent>
+                    </tileContent>
+                </GenericTile>
+                <GenericTile class="sapUiTinyMarginEnd sapUiTinyMarginBottom btpcKpiTile"
+                             header="{i18n>kpiProtections}"
+                             subheader="{= ${kpis>/protectionCount} + ' active' }"
+                             frameType="OneByOne" press=".onKpiPress('protected')">
+                    <tileContent>
+                        <TileContent footer="{i18n>kpiProtectionsFooter}">
+                            <content>
+                                <NumericContent value="{kpis>/protectionCount}"
+                                                icon="sap-icon://employee-rejections"
+                                                valueColor="Critical"/>
+                            </content>
+                        </TileContent>
+                    </tileContent>
+                </GenericTile>
+                <GenericTile class="sapUiTinyMarginEnd sapUiTinyMarginBottom btpcKpiTile"
+                             header="{i18n>kpiDiscovery}"
+                             subheader="{= ${kpis>/candidateCount} === 0 ? 'all discovered subaccounts enrolled' : (${kpis>/candidateCount} + ' discovered, not yet enrolled') }"
+                             frameType="OneByOne" press=".onKpiPress('discovery')">
+                    <tileContent>
+                        <TileContent footer="{i18n>kpiDiscoveryFooter}">
+                            <content>
+                                <NumericContent value="{kpis>/candidateCount}"
+                                                icon="sap-icon://world" valueColor="Neutral"/>
+                            </content>
+                        </TileContent>
+                    </tileContent>
+                </GenericTile>
+                <GenericTile class="sapUiTinyMarginEnd sapUiTinyMarginBottom btpcKpiTileWide"
+                             header="{i18n>kpiLogs}"
+                             subheader="{= ${kpis>/recentFailureCount} === 0 ? 'no failures (14d)' : (${kpis>/recentFailureCount} + ' failed (14d)') }"
+                             frameType="TwoByOne" press=".onKpiPress('logs')">
+                    <tileContent>
+                        <TileContent>
+                            <content>
+                                <mc:ColumnMicroChart allowColumnLabels="false"
+                                                     height="4rem" width="100%"
+                                                     columns="{trends>/failureTrend}">
+                                    <mc:columns>
+                                        <mc:ColumnMicroChartData label="{trends>label}"
+                                                                 value="{trends>value}"
+                                                                 color="Error"/>
+                                    </mc:columns>
+                                </mc:ColumnMicroChart>
+                            </content>
+                        </TileContent>
+                    </tileContent>
+                </GenericTile>
+                <GenericTile class="sapUiTinyMarginEnd sapUiTinyMarginBottom btpcKpiTile"
+                             header="{i18n>kpiAdmin}"
+                             subheader="{= ${kpis>/enabledSinkCount} + ' audit sinks enabled' }"
+                             frameType="OneByOne" press=".onKpiPress('admin')">
+                    <tileContent>
+                        <TileContent footer="{i18n>kpiAdminFooter}">
+                            <content>
+                                <NumericContent value="{kpis>/enabledSinkCount}"
+                                                icon="sap-icon://it-system"
+                                                valueColor="Neutral"/>
+                            </content>
+                        </TileContent>
+                    </tileContent>
+                </GenericTile>
+            </HBox>
+			</VBox>
+
+                    <!-- ============ SUBACCOUNTS PAGE ============ -->
+                    <VBox width="100%" class="btpcSection" visible="{= ${nav>/currentPage} === 'subaccounts' }">
+                        <Panel headerText="{i18n>titleSubaccounts}" class="btpcPanel">
+                            <headerToolbar>
+                                <OverflowToolbar>
+                                    <Title text="{i18n>titleSubaccounts}" level="H2"/>
+                                    <ToolbarSpacer/>
+                                    <SearchField placeholder="{i18n>filterPlaceholder}"
+                                                 liveChange=".onSubaccountFilterChange">
+                                        <layoutData>
+                                            <OverflowToolbarLayoutData shrinkable="true" minWidth="8rem" maxWidth="22rem"/>
+                                        </layoutData>
+                                    </SearchField>
+                                    <Button text="{i18n>btnRefresh}" icon="sap-icon://refresh" press=".onRefresh"/>
+                                    <Button text="{i18n>btnEnroll}" icon="sap-icon://add" type="Emphasized" press=".onOpenEnroll"
+                                            visible="{shell>/isAdmin}"/>
+                                </OverflowToolbar>
+                            </headerToolbar>
+
+                            <Table id="subaccountTable" items="{data>/subaccounts}"
+                                   growing="true" growingThreshold="20"
+                                   sticky="ColumnHeaders"
+                                   noDataText="No subaccounts enrolled yet." >
+                                <columns>
+                                    <Column><Text text="{i18n>colCisName}"/></Column>
+                                    <Column><Text text="{i18n>colGaName}"/></Column>
+                                    <Column><Text text="{i18n>colLabel}"/></Column>
+                                    <Column><Text text="{i18n>colRegion}"/></Column>
+                                    <Column><Text text="{i18n>colCapabilities}"/></Column>
+                                    <Column><Text text="{i18n>colContacts}"/></Column>
+                                    <Column><Text text="{i18n>colEnrolledAt}"/></Column>
+                                    <Column><Text text="{i18n>colStatus}"/></Column>
+                                    <Column><Text text="{i18n>colActions}"/></Column>
+                                </columns>
+                                <items>
+                                    <ColumnListItem>
+                                        <cells>
+                                            <VBox>
+                                                <Text text="{data>cisDisplayName}"/>
+                                                <Text text="{data>subaccountGuid}" class="sapUiTinyMarginTop"/>
+                                            </VBox>
+                                            <VBox>
+                                                <Text text="{data>globalAccountName}"/>
+                                                <Text text="{data>globalAccountId}" class="sapUiTinyMarginTop"/>
+                                            </VBox>
+                                            <VBox>
+                                                <Text text="{data>label}"/>
+                                                <ObjectStatus text="{data>stage}" state="Information" visible="{= !!${data>stage} }" class="sapUiTinyMarginTop"/>
+                                            </VBox>
+                                            <Text text="{data>region}"/>
+                                            <VBox>
+                                                <HBox>
+                                                    <!-- IAS is a tenant-level concept (managed in the IAS Tenants tab),
+                                                         so the per-subaccount chip is gone " the tenant link lives in
+                                                         the Edit dialog. -->
+                                                    <ObjectStatus text="XSUAA"
+                                                                  state="{= ${data>capabilities/xsuaaApiaccess} ? 'Success' : 'Warning'}"
+                                                                  icon="{= ${data>capabilities/xsuaaApiaccess} ? 'sap-icon://accept' : 'sap-icon://decline'}"
+                                                                  class="sapUiTinyMarginEnd" tooltip="{i18n>capXsuaaTip}"/>
+                                                    <ObjectStatus text="CF"
+                                                                  state="{= ${data>capabilities/cfTechnicalUser} ? 'Success' : 'Warning'}"
+                                                                  icon="{= ${data>capabilities/cfTechnicalUser} ? 'sap-icon://accept' : 'sap-icon://decline'}"
+                                                                  tooltip="{i18n>capCfTip}"/>
+                                                </HBox>
+                                                <!-- cf_org_id is required for cf_revoke_org_roles to know
+                                                     which CF org belongs to this subaccount (the shared
+                                                     technical user can see many). Flag missing pins inline
+                                                     so the operator notices before they hit a containment
+                                                     run that 500s on this subaccount only. -->
+                                                <ObjectStatus text="{= ${data>cfOrgId} ? ('org ' + ${data>cfOrgId}.substring(0, 8) + '...') : 'CF org not pinned' }"
+                                                              state="{= ${data>cfOrgId} ? 'Success' : 'Warning' }"
+                                                              icon="{= ${data>cfOrgId} ? 'sap-icon://accept' : 'sap-icon://alert' }"
+                                                              tooltip="{= ${data>cfOrgId} ? ('Full org guid: ' + ${data>cfOrgId}) : 'cf_revoke_org_roles will fail until this is set (Edit then CF org id).' }"
+                                                              visible="{= !!${data>capabilities/cfTechnicalUser} }"
+                                                              class="sapUiTinyMarginTop"/>
+                                            </VBox>
+                                            <ObjectStatus text="{data>contactCount}" state="Information"/>
+                                            <Text text="{data>enrolledAt}"/>
+                                            <ObjectStatus text="{data>status}" state="Success"/>
+                                            <HBox visible="{shell>/isAdmin}">
+                                                <Button icon="sap-icon://edit" type="Transparent" press=".onOpenEdit"
+                                                        tooltip="{i18n>btnEdit}"/>
+                                                <Button icon="sap-icon://delete" type="Transparent" press=".onDeleteRow"
+                                                        tooltip="{i18n>btnDelete}"/>
+                                            </HBox>
+                                        </cells>
+                                    </ColumnListItem>
+                                </items>
+                            </Table>
+                        </Panel>
+                    </VBox>
+
+                    <!-- ============ IAS TENANTS PAGE ============ -->
+                    <VBox width="100%" class="btpcSection" visible="{= ${nav>/currentPage} === 'iasTenants' }">
+                        <Panel headerText="{i18n>titleIasTenants}" class="btpcPanel">
+                            <MessageStrip text="{i18n>iasTenantsHint}" type="Information" showIcon="true"
+                                          class="sapUiTinyMarginBottom"/>
+                            <HBox class="sapUiTinyMarginBottom">
+                                <Button text="{i18n>btnAddIasTenant}" type="Emphasized"
+                                        icon="sap-icon://add" press=".onOpenAddIasTenant"/>
+                                <ToolbarSpacer/>
+                                <Button icon="sap-icon://refresh" type="Transparent"
+                                        press=".onRefreshIasTenants"
+                                        tooltip="{i18n>btnRefresh}"/>
+                            </HBox>
+                            <Table items="{iasTenants>/list}"
+                                   growing="true" growingThreshold="20"
+                                   sticky="ColumnHeaders"
+                                   noDataText="{i18n>iasTenantsEmpty}">
+                                <columns>
+                                    <Column><Text text="{i18n>iasTenantColName}"/></Column>
+                                    <Column><Text text="{i18n>iasTenantColHost}"/></Column>
+                                    <Column><Text text="{i18n>iasTenantColUpdated}"/></Column>
+                                    <Column hAlign="End"><Text text="{i18n>colActions}"/></Column>
+                                </columns>
+                                <items>
+                                    <ColumnListItem>
+                                        <cells>
+                                            <ObjectIdentifier title="{iasTenants>displayName}"/>
+                                            <Text text="{iasTenants>iasHost}"/>
+                                            <Text text="{path: 'iasTenants>updatedAt',
+                                                         formatter: '.fmtDate'}"/>
+                                            <HBox justifyContent="End">
+                                                <Button icon="sap-icon://edit" type="Transparent"
+                                                        press=".onOpenEditIasTenant"
+                                                        tooltip="{i18n>btnEdit}"/>
+                                                <Button icon="sap-icon://delete" type="Transparent"
+                                                        press=".onDeleteIasTenant"
+                                                        tooltip="{i18n>btnDelete}"/>
+                                            </HBox>
+                                        </cells>
+                                    </ColumnListItem>
+                                </items>
+                            </Table>
+                        </Panel>
+                    </VBox>
+
+                    <!-- ============ DISCOVERY PAGE ============ -->
+                    <VBox width="100%" class="btpcSection" visible="{= ${nav>/currentPage} === 'discovery' }">
+                        <Panel headerText="{i18n>titleSavedKeys}" class="btpcPanel">
+                            <headerToolbar>
+                                <OverflowToolbar>
+                                    <Title text="{i18n>titleSavedKeys}" level="H2"/>
+                                    <ToolbarSpacer/>
+                                    <Button text="{i18n>btnRefresh}" icon="sap-icon://refresh" press="loadDiscovery"/>
+                                    <Button text="{i18n>btnAddSavedKey}" icon="sap-icon://add"
+                                            type="Emphasized" press=".onOpenAddSavedKey"/>
+                                </OverflowToolbar>
+                            </headerToolbar>
+
+                            <!-- Info banner inside the panel so it sits with
+                                 the content it explains (was a sibling of the
+                                 panel, which placed it outside the padded box). -->
+                            <MessageStrip text="{i18n>discoveryTabHint}" type="Information" showIcon="true"/>
+
+                            <Table items="{discovery>/savedKeys}"
+                                   growing="true" growingThreshold="20"
+                                   noDataText="No Central-Viewer keys saved. Click 'Add Central-Viewer key' to start auto-discovery.">
+                                <columns>
+                                    <Column><Text text="{i18n>colSavedKeyLabel}"/></Column>
+                                    <Column><Text text="{i18n>colSavedKeyGa}"/></Column>
+                                    <Column><Text text="{i18n>colSavedKeySyncEnabled}"/></Column>
+                                    <Column><Text text="{i18n>colSavedKeyInterval}"/></Column>
+                                    <Column><Text text="{i18n>colSavedKeyLastSync}"/></Column>
+                                    <Column><Text text="{i18n>colSavedKeyLastCount}"/></Column>
+                                    <Column><Text text="{i18n>colSavedKeyError}"/></Column>
+                                    <Column><Text text="{i18n>colSavedKeyAddedBy}"/></Column>
+                                    <Column hAlign="End"><Text text="{i18n>colActions}"/></Column>
+                                </columns>
+                                <items>
+                                    <ColumnListItem>
+                                        <cells>
+                                            <VBox>
+                                                <Text text="{discovery>label}"/>
+                                                <Text text="{discovery>id}" class="sapUiTinyMarginTop"/>
+                                            </VBox>
+                                            <VBox>
+                                                <Text text="{discovery>globalAccountName}"/>
+                                                <Text text="{discovery>globalAccountId}" class="sapUiTinyMarginTop"/>
+                                            </VBox>
+                                            <Switch state="{discovery>syncEnabled}" change=".onToggleSavedKeyEnabled"/>
+                                            <Input value="{discovery>syncIntervalMinutes}" type="Number"
+                                                   width="6rem" change=".onChangeSavedKeyInterval"/>
+                                            <Text text="{discovery>lastSyncAt}"/>
+                                            <ObjectStatus text="{discovery>lastSyncCount}" state="Information"
+                                                          visible="{= ${discovery>lastSyncCount} !== null }"/>
+                                            <ObjectStatus text="{discovery>lastSyncError}" state="Error"
+                                                          visible="{= !!${discovery>lastSyncError} }"/>
+                                            <Text text="{discovery>addedBy}"/>
+                                            <HBox>
+                                                <Button icon="sap-icon://refresh" type="Transparent"
+                                                        press=".onSyncSavedKeyNow"
+                                                        tooltip="{i18n>btnSyncNow}"/>
+                                                <Button icon="sap-icon://delete" type="Transparent"
+                                                        press=".onDeleteSavedKey"
+                                                        tooltip="{i18n>btnDelete}"/>
+                                            </HBox>
+                                        </cells>
+                                    </ColumnListItem>
+                                </items>
+                            </Table>
+                        </Panel>
+                    </VBox>
+
+                    <!-- ============ LOGS PAGE ============ -->
+                    <VBox width="100%" class="btpcSection" visible="{= ${nav>/currentPage} === 'logs' }">
+                        <Panel headerText="{i18n>logsTrendTitle}" class="btpcPanel"
+                               expandable="true" expanded="true">
+                            <HBox wrap="Wrap" class="sapUiSmallMargin">
+                                <VBox class="sapUiSmallMarginEnd" width="22rem">
+                                    <Title text="{i18n>logsTrendActivity}" level="H4"/>
+                                    <Text text="{i18n>logsTrendActivityHint}"/>
+                                    <Text text="{= 'max ' + ${trends>/containmentMax} + ' / day  -  window ' + ${trends>/containmentFirstLabel} + ' to ' + ${trends>/containmentLastLabel} }"
+                                          class="sapUiTinyMarginTop"/>
+                                    <mc:ColumnMicroChart height="6rem" width="20rem"
+                                                         allowColumnLabels="false"
+                                                         columns="{trends>/containmentTrend}">
+                                        <mc:columns>
+                                            <mc:ColumnMicroChartData label="{trends>label}"
+                                                                     value="{trends>value}"
+                                                                     color="Good"/>
+                                        </mc:columns>
+                                    </mc:ColumnMicroChart>
+                                </VBox>
+                                <VBox class="sapUiSmallMarginEnd" width="22rem">
+                                    <Title text="{i18n>logsTrendFailures}" level="H4"/>
+                                    <Text text="{i18n>logsTrendFailuresHint}"/>
+                                    <Text text="{= 'max ' + ${trends>/failureMax} + ' / day  -  window ' + ${trends>/failureFirstLabel} + ' to ' + ${trends>/failureLastLabel} }"
+                                          class="sapUiTinyMarginTop"/>
+                                    <mc:ColumnMicroChart height="6rem" width="20rem"
+                                                         allowColumnLabels="false"
+                                                         columns="{trends>/failureTrend}">
+                                        <mc:columns>
+                                            <mc:ColumnMicroChartData label="{trends>label}"
+                                                                     value="{trends>value}"
+                                                                     color="Error"/>
+                                        </mc:columns>
+                                    </mc:ColumnMicroChart>
+                                </VBox>
+                                <VBox width="22rem">
+                                    <Title text="{i18n>logsTrendOutcome}" level="H4"/>
+                                    <Text text="{i18n>logsTrendOutcomeHint}"/>
+                                    <mc:ComparisonMicroChart width="20rem"
+                                                             data="{trends>/outcomeBuckets}">
+                                        <mc:data>
+                                            <mc:ComparisonMicroChartData title="{trends>label}"
+                                                                         value="{trends>value}"
+                                                                         color="{trends>color}"/>
+                                        </mc:data>
+                                    </mc:ComparisonMicroChart>
+                                </VBox>
+                            </HBox>
+                        </Panel>
+                        <Panel headerText="{i18n>titleLogs}" class="btpcPanel">
+                            <headerToolbar>
+                                <OverflowToolbar>
+                                    <Title text="{i18n>titleLogs}" level="H2"/>
+                                    <ToolbarSpacer/>
+                                    <Button text="{i18n>btnExportCsv}" icon="sap-icon://excel-attachment"
+                                            press=".onExportLogs">
+                                        <customData>
+                                            <core:CustomData key="format" value="csv" writeToDom="false"/>
+                                        </customData>
+                                    </Button>
+                                    <Button text="{i18n>btnExportJson}" icon="sap-icon://attachment"
+                                            press=".onExportLogs">
+                                        <customData>
+                                            <core:CustomData key="format" value="json" writeToDom="false"/>
+                                        </customData>
+                                    </Button>
+                                </OverflowToolbar>
+                            </headerToolbar>
+
+                            <MessageStrip text="{i18n>logsHint}" type="Information" showIcon="true"/>
+
+                            <l:Grid xmlns:l="sap.ui.layout" defaultSpan="L4 M6 S12" hSpacing="1" vSpacing="0"
+                                    class="sapUiSmallMarginTop">
+                                <l:VerticalLayout>
+                                    <Label text="{i18n>logFilterAction}"/>
+                                    <Select selectedKey="{logs>/filters/action}" forceSelection="false">
+                                        <core:Item key=""                       text="(any)"/>
+                                        <core:Item key="ias_deactivate"         text="ias_deactivate"/>
+                                        <core:Item key="ias_activate"           text="ias_activate"/>
+                                        <core:Item key="ias_strip_groups"       text="ias_strip_groups"/>
+                                        <core:Item key="ias_restore_groups"     text="ias_restore_groups"/>
+                                        <core:Item key="xsuaa_strip_roles"      text="xsuaa_strip_roles"/>
+                                        <core:Item key="xsuaa_restore_roles"    text="xsuaa_restore_roles"/>
+                                        <core:Item key="xsuaa_delete_shadow"    text="xsuaa_delete_shadow"/>
+                                        <core:Item key="cf_revoke_org_roles"    text="cf_revoke_org_roles"/>
+                                        <core:Item key="cf_restore_org_roles"   text="cf_restore_org_roles"/>
+                                        <core:Item key="enroll"                 text="enroll"/>
+                                        <core:Item key="unenroll"               text="unenroll"/>
+                                        <core:Item key="sod_scan"               text="sod_scan"/>
+                                        <core:Item key="sod_finding"            text="sod_finding"/>
+                                        <core:Item key="protect_add"            text="protect_add"/>
+                                        <core:Item key="protect_disable"        text="protect_disable"/>
+                                        <core:Item key="protect_block"          text="protect_block"/>
+                                        <core:Item key="comment"                text="comment"/>
+                                        <core:Item key="health_check"           text="health_check"/>
+                                    </Select>
+                                </l:VerticalLayout>
+                                <l:VerticalLayout>
+                                    <Label text="{i18n>logFilterOutcome}"/>
+                                    <Select selectedKey="{logs>/filters/outcome}" forceSelection="false"
+                                            class="btpcLogOutcomeSelect">
+                                        <core:Item key=""        text="(any)"/>
+                                        <core:Item key="ok"      text="ok"/>
+                                        <core:Item key="partial" text="partial"/>
+                                        <core:Item key="failed"  text="failed"/>
+                                        <core:Item key="dry-run" text="dry-run"/>
+                                        <core:Item key="skipped" text="skipped"/>
+                                    </Select>
+                                </l:VerticalLayout>
+                                <l:VerticalLayout>
+                                    <Label text="{i18n>logFilterSystemType}"/>
+                                    <Select selectedKey="{logs>/filters/systemType}" forceSelection="false">
+                                        <core:Item key=""           text="(any)"/>
+                                        <core:Item key="SUBACCOUNT" text="Subaccount"/>
+                                        <core:Item key="IAS"        text="IAS tenant"/>
+                                        <core:Item key="INTERNAL"   text="Global"/>
+                                        <core:Item key="ONPREM"     text="On-prem"/>
+                                    </Select>
+                                </l:VerticalLayout>
+                                <l:VerticalLayout>
+                                    <Label text="{i18n>logFilterActor}"/>
+                                    <Input value="{logs>/filters/actor}" placeholder="substring, case-insensitive"/>
+                                </l:VerticalLayout>
+                                <l:VerticalLayout>
+                                    <Label text="{i18n>logFilterTarget}"/>
+                                    <Input value="{logs>/filters/targetEmail}" placeholder="substring, case-insensitive"/>
+                                </l:VerticalLayout>
+                                <l:VerticalLayout>
+                                    <Label text="{i18n>logFilterFromDate}"/>
+                                    <DateTimePicker value="{logs>/filters/fromDate}"
+                                                    valueFormat="yyyy-MM-dd'T'HH:mm:ss'Z'"
+                                                    displayFormat="yyyy-MM-dd HH:mm"
+                                                    />
+                                </l:VerticalLayout>
+                                <l:VerticalLayout>
+                                    <Label text="{i18n>logFilterToDate}"/>
+                                    <DateTimePicker value="{logs>/filters/toDate}"
+                                                    valueFormat="yyyy-MM-dd'T'HH:mm:ss'Z'"
+                                                    displayFormat="yyyy-MM-dd HH:mm"
+                                                    />
+                                </l:VerticalLayout>
+                                <l:VerticalLayout>
+                                    <Label text="{i18n>logFilterLimit}"/>
+                                    <Input value="{logs>/filters/limit}" type="Number" width="100%"/>
+                                </l:VerticalLayout>
+                            </l:Grid>
+
+                            <HBox class="sapUiSmallMarginTop">
+                                <Button text="{i18n>btnApplyFilters}" icon="sap-icon://filter"
+                                        type="Emphasized" press=".onApplyLogFilters"/>
+                                <Button text="{i18n>btnResetFilters}" icon="sap-icon://clear-filter"
+                                        type="Transparent" press=".onResetLogFilters"
+                                        class="sapUiSmallMarginBegin"/>
+                            </HBox>
+
+                            <Table items="{logs>/rows}"
+                                   growing="true" growingThreshold="20"
+                                   sticky="ColumnHeaders"
+                                   noDataText="{i18n>logsEmpty}"
+                                   class="sapUiSmallMarginTop">
+                                <columns>
+                                    <Column><Text text="{i18n>colTime}"/></Column>
+                                    <Column><Text text="{i18n>colAction}"/></Column>
+                                    <Column><Text text="{i18n>colOutcome}"/></Column>
+                                    <Column><Text text="{i18n>colTarget}"/></Column>
+                                    <Column><Text text="{i18n>colActor}"/></Column>
+                                    <Column><Text text="{i18n>colScope}"/></Column>
+                                    <Column><Text text="{i18n>colError}"/></Column>
+                                </columns>
+                                <items>
+                                    <ColumnListItem>
+                                        <cells>
+                                            <Text text="{logs>startedAt}"/>
+                                            <Text text="{logs>action}"/>
+                                            <ObjectStatus text="{logs>outcome}"
+                                                          state="{= ${logs>outcome} === 'ok' ? 'Success' : ${logs>outcome} === 'failed' ? 'Error' : 'Warning' }"/>
+                                            <Text text="{logs>targetUserEmail}"/>
+                                            <Text text="{logs>actor}"/>
+                                            <!-- system_type-aware scope label:
+                                                 SUBACCOUNT -> subaccount name,
+                                                 IAS        -> IAS tenant name,
+                                                 INTERNAL   -> (global),
+                                                 anything else -> system_id or '?'. -->
+                                            <Text text="{= ${logs>systemType} === 'SUBACCOUNT' ? (${logs>subaccountDisplayName} || '(unknown subaccount)') : ${logs>systemType} === 'IAS' ? (${logs>iasTenantName} || '(unknown IAS tenant)') : ${logs>systemType} === 'INTERNAL' ? '(global)' : (${logs>systemId} || '?') }"/>
+                                            <Text text="{logs>errorMessage}"/>
+                                        </cells>
+                                    </ColumnListItem>
+                                </items>
+                            </Table>
+                        </Panel>
+                    </VBox>
+
+                    <!-- ============ CONTAINMENT PAGE ============ -->
+                    <VBox width="100%" class="btpcSection" visible="{= ${nav>/currentPage} === 'containment' }">
+                        <Panel headerText="{i18n>titleContainment}" class="btpcPanel">
+                            <!-- Dry-run state moved out of the panel " there's
+                                 now a "Test" button alongside "Run" and the
+                                 button labels make the mode explicit. The old
+                                 contDryRunHint / contLiveBanner banners just
+                                 duplicated that signal. -->
+                            <MessageStrip text="{i18n>contIasImplicitHint}" type="Information"
+                                          showIcon="true"/>
+
+                            <!-- Target user -->
+
+                            <Label text="{i18n>contLblEmail}" required="true" class="sapUiMediumMarginTop"/>
+                            <Input value="{contain>/userEmail}" placeholder="target@example.com"
+                                   class="sapUiTinyMarginTop"/>
+
+                            <Label text="{i18n>contLblComment}" class="sapUiSmallMarginTop"/>
+                            <Input value="{contain>/comment}" placeholder="{i18n>contLblCommentPh}"
+                                   class="sapUiTinyMarginTop"/>
+
+                            <!-- Scope: IAS tenants + subaccounts -->
+                            <Label text="{i18n>contLblIasTenantMulti}" class="sapUiMediumMarginTop"/>
+                            <MultiComboBox items="{iasTenants>/list}"
+                                           selectedKeys="{contain>/iasTenantIds}"
+                                           placeholder="{i18n>contIasTenantAllHint}"
+                                           width="100%"
+                                           class="sapUiTinyMarginTop">
+                                <core:Item key="{iasTenants>id}"
+                                           text="{iasTenants>displayName} ({iasTenants>iasHost})"/>
+                            </MultiComboBox>
+
+                            <Label text="{i18n>contLblSubaccountMulti}" class="sapUiSmallMarginTop"/>
+                            <MultiComboBox id="contSubaccountPicker"
+                                           items="{data>/subaccounts}"
+                                           selectedKeys="{contain>/subaccountIds}"
+                                           placeholder="{i18n>contSubaccountAllHint}"
+                                           width="100%"
+                                           class="sapUiTinyMarginTop">
+                                <core:Item key="{data>id}"
+                                           text="{data>cisDisplayName} ({data>region})"/>
+                            </MultiComboBox>
+
+                            <!-- Per-subaccount action toggles, grouped by upstream
+                                 service so the operator scans them by capability,
+                                 not by a flat alphabetical list. IAS deactivate
+                                 is implicit per selected tenant - no toggle. -->
+                            <Label text="{i18n>contLblActions}" class="sapUiMediumMarginTop"/>
+                            <VBox class="sapUiTinyMarginTop">
+                                <!-- One-click presets for the common containment
+                                     archetypes. "Full lockout" enables every
+                                     toggle; "Quick kick" enables only the
+                                     session-killing actions (revoke tokens +
+                                     deactivate IAS, which is always implicit). -->
+                                <HBox class="sapUiTinyMarginBottom" alignItems="Center">
+                                    <Button text="{i18n>contActPresetAll}"
+                                            icon="sap-icon://multi-select"
+                                            press=".onContainPresetAll"/>
+                                    <Button text="{i18n>contActPresetKick}"
+                                            icon="sap-icon://decline"
+                                            press=".onContainPresetKick"
+                                            class="sapUiTinyMarginBegin"/>
+                                    <Button text="{i18n>contActPresetClear}"
+                                            icon="sap-icon://clear-all"
+                                            press=".onContainPresetClear"
+                                            class="sapUiTinyMarginBegin"/>
+                                    <ToolbarSpacer/>
+                                </HBox>
+
+                                <Panel headerText="{i18n>contActGroupIas}"
+                                       expandable="true" expanded="true"
+                                       class="sapUiTinyMarginTop">
+                                    <VBox>
+                                        <CheckBox text="{i18n>contActIasDeactivate}"
+                                                  selected="{contain>/actIasDeactivate}"/>
+                                        <Text text="{i18n>contActIasDeactivateHint}"
+                                              class="sapUiTinyMarginBegin sapUiTinyMarginBottom"/>
+                                        <CheckBox text="{i18n>contActIasStripGroups}"
+                                                  selected="{contain>/actIasStripGroups}"/>
+                                        <Text text="{i18n>contActIasStripGroupsHint}"
+                                              class="sapUiTinyMarginBegin"/>
+                                    </VBox>
+                                </Panel>
+
+                                <Panel headerText="{i18n>contActGroupXsuaa}"
+                                       expandable="true" expanded="true"
+                                       class="sapUiTinyMarginTop">
+                                    <VBox>
+                                        <CheckBox text="{i18n>contActStripRoles}"
+                                                  selected="{contain>/actStripRoles}"/>
+                                        <Text text="{i18n>contActStripRolesHint}"
+                                              class="sapUiTinyMarginBegin sapUiTinyMarginBottom"/>
+                                        <CheckBox text="{i18n>contActDeleteShadow}"
+                                                  selected="{contain>/actDeleteShadow}"/>
+                                        <Text text="{i18n>contActDeleteShadowHint}"
+                                              class="sapUiTinyMarginBegin"/>
+                                    </VBox>
+                                </Panel>
+
+                                <Panel headerText="{i18n>contActGroupCf}"
+                                       expandable="true" expanded="true"
+                                       class="sapUiTinyMarginTop">
+                                    <VBox>
+                                        <CheckBox text="{i18n>contActCfRevokeOrg}"
+                                                  selected="{contain>/actCfRevokeOrg}"/>
+                                        <Text text="{i18n>contActCfRevokeOrgHint}"
+                                              class="sapUiTinyMarginBegin"/>
+                                    </VBox>
+                                </Panel>
+                            </VBox>
+
+                            <!-- Origin scoping applies to the XSUAA strip/delete
+                                 actions AND to resolveCfUser's user lookup
+                                 (when the CF technical user has shadows at
+                                 multiple origins). Visibility tracks whichever
+                                 of the three boxes is ticked. -->
+                            <VBox visible="{= ${contain>/actStripRoles} || ${contain>/actDeleteShadow} || ${contain>/actCfRevokeOrg} }"
+                                  class="sapUiMediumMarginTop">
+                                <Label text="{i18n>contLblOriginMode}"/>
+                                <SegmentedButton selectedKey="{contain>/originMode}"
+                                                 class="sapUiTinyMarginTop">
+                                    <items>
+                                        <SegmentedButtonItem key="all"        text="{i18n>contOriginModeAll}"        icon="sap-icon://world"/>
+                                        <SegmentedButtonItem key="list"       text="{i18n>contOriginModeList}"       icon="sap-icon://filter"/>
+                                        <SegmentedButtonItem key="discovered" text="{i18n>contOriginModeDiscovered}" icon="sap-icon://detail-view"/>
+                                        <SegmentedButtonItem key="profile"    text="{i18n>contOriginModeProfile}"    icon="sap-icon://favorite-list"/>
+                                    </items>
+                                </SegmentedButton>
+                            </VBox>
+
+                            <!-- 'list' mode: free-text CSV/whitespace separated origin keys. -->
+                            <l:VerticalLayout xmlns:l="sap.ui.layout"
+                                              visible="{= (${contain>/actStripRoles} || ${contain>/actDeleteShadow} || ${contain>/actCfRevokeOrg}) &amp;&amp; ${contain>/originMode} === 'list' }">
+                                <Label text="{i18n>contLblOriginsList}" required="true" class="sapUiSmallMarginTop"/>
+                                <TextArea value="{contain>/originsList}"
+                                          placeholder="{i18n>contLblOriginsListHint}"
+                                          rows="3" width="40rem"/>
+                            </l:VerticalLayout>
+
+                            <!-- 'discovered' mode: scan XSUAA /sap/rest/identity-providers and
+                                 pick from the deduped origin set. -->
+                            <l:VerticalLayout xmlns:l="sap.ui.layout"
+                                              visible="{= (${contain>/actStripRoles} || ${contain>/actDeleteShadow} || ${contain>/actCfRevokeOrg}) &amp;&amp; ${contain>/originMode} === 'discovered' }">
+                                <HBox class="sapUiSmallMarginTop" alignItems="Center">
+                                    <Button text="{i18n>contBtnDiscoverOrigins}"
+                                            icon="sap-icon://refresh"
+                                            press=".onDiscoverOrigins"
+                                            enabled="{= !${contain>/discoverBusy} }"/>
+                                    <Text text="{= ${contain>/discoveredOrigins}.length + ' origin(s) discovered' }"
+                                          class="sapUiSmallMarginBegin"/>
+                                </HBox>
+                                <MultiComboBox items="{contain>/discoveredOrigins}"
+                                               selectedKeys="{contain>/selectedOrigins}"
+                                               placeholder="{i18n>contLblOriginsDiscoveredHint}"
+                                               width="40rem">
+                                    <core:Item key="{contain>originKey}"
+                                               text="{contain>originKey} - {contain>name} ({contain>type})"/>
+                                </MultiComboBox>
+                                <HBox class="sapUiTinyMarginTop">
+                                    <ToolbarSpacer/>
+                                    <Button text="{i18n>contBtnSaveAsProfile}"
+                                            icon="sap-icon://save"
+                                            press=".onSaveProfileFromDiscovered"
+                                            enabled="{= ${contain>/selectedOrigins}.length > 0 }"/>
+                                </HBox>
+                                <List items="{contain>/discoverErrors}"
+                                      visible="{= ${contain>/discoverErrors}.length > 0 }"
+                                      headerText="{i18n>contDiscoverErrors}"
+                                      class="sapUiTinyMarginTop">
+                                    <StandardListItem
+                                        title="{contain>subaccountDisplayName}"
+                                        description="{contain>error}"
+                                        icon="sap-icon://alert"/>
+                                </List>
+                            </l:VerticalLayout>
+
+                            <!-- 'profile' mode: pick a saved origin set. -->
+                            <l:VerticalLayout xmlns:l="sap.ui.layout"
+                                              visible="{= (${contain>/actStripRoles} || ${contain>/actDeleteShadow} || ${contain>/actCfRevokeOrg}) &amp;&amp; ${contain>/originMode} === 'profile' }">
+                                <Label text="{i18n>contLblOriginProfile}" required="true" class="sapUiSmallMarginTop"/>
+                                <Select items="{profiles>/list}"
+                                        selectedKey="{contain>/originProfileId}"
+                                        width="40rem" forceSelection="false">
+                                    <core:Item key="" text="{i18n>contLblOriginProfileNone}"/>
+                                    <core:Item key="{profiles>id}"
+                                               text="{profiles>name} ({= ${profiles>originKeys}.length } keys)"/>
+                                </Select>
+                                <Text text="{i18n>contLblOriginProfileHint}" class="sapUiTinyMarginTop"/>
+                            </l:VerticalLayout>
+
+                            <!-- Two-button pattern (test then live), no
+                                 dryRun checkbox. Mirrors the audit-sink
+                                 "Test connection / Save" affordance. Test
+                                 sends dryRun=true and never mutates. -->
+                            <HBox class="sapUiMediumMarginTop" alignItems="Center">
+                                <ToolbarSpacer/>
+                                <Button text="{i18n>contBtnTest}"
+                                        icon="sap-icon://lab"
+                                        press=".onTestContainment"
+                                        class="sapUiTinyMarginEnd"/>
+                                <Button text="{i18n>contBtnRun}" type="Emphasized" icon="sap-icon://shield"
+                                        press=".onRunContainment"/>
+                            </HBox>
+
+                            <Panel headerText="{i18n>contRunResultTitle}" expandable="true"
+                                   expanded="true" visible="{= !!${contain>/lastResult}}"
+                                   class="sapUiSmallMarginTop">
+                                <l:VerticalLayout width="100%" class="sapUiContentPadding"
+                                                   xmlns:l="sap.ui.layout">
+                                    <HBox alignItems="Center" class="sapUiTinyMarginBottom">
+                                        <ObjectStatus text="{contain>/lastResult/summaryText}"
+                                                      state="{contain>/lastResult/summaryState}"
+                                                      icon="{= ${contain>/lastResult/summaryState} === 'Error' ? 'sap-icon://error' : ${contain>/lastResult/summaryState} === 'Warning' ? 'sap-icon://alert' : 'sap-icon://accept' }"/>
+                                        <ObjectStatus text="dry-run" state="Warning"
+                                                      class="sapUiSmallMarginBegin"
+                                                      visible="{contain>/lastResult/dryRun}"/>
+                                    </HBox>
+
+                                    <!-- Unified actions table: one row per
+                                         (scope, target, action). Pre-sorted by
+                                         severity so failures + skips sit at the
+                                         top; same shape for IAS and subaccount
+                                         rows, so the operator scans ONE table
+                                         instead of two nested ones.
+
+                                         Blocked-by-protection subaccounts appear
+                                         as a synthesised "skipped" row with
+                                         the reason in the message column. -->
+                                    <Table items="{contain>/lastResult/allActions}" inset="false"
+                                           growing="true" growingThreshold="20"
+                                           sticky="ColumnHeaders"
+                                           noDataText="No actions ran."
+                                           class="sapUiTinyMarginTop">
+                                        <columns>
+                                            <Column width="8rem"><Text text="Scope"/></Column>
+                                            <Column><Text text="Target"/></Column>
+                                            <Column><Text text="{i18n>colAction}"/></Column>
+                                            <Column width="7rem"><Text text="{i18n>colOutcome}"/></Column>
+                                            <Column><Text text="Message"/></Column>
+                                        </columns>
+                                        <items>
+                                            <ColumnListItem>
+                                                <cells>
+                                                    <ObjectStatus text="{contain>scope}"
+                                                                  state="{= ${contain>scope} === 'IAS' ? 'Information' : 'None' }"
+                                                                  icon="{= ${contain>scope} === 'IAS' ? 'sap-icon://locked' : 'sap-icon://building' }"/>
+                                                    <ObjectIdentifier title="{contain>targetTitle}"
+                                                                      text="{contain>targetSub}"/>
+                                                    <Text text="{contain>action}"/>
+                                                    <ObjectStatus text="{contain>outcome}"
+                                                                  state="{= ${contain>outcome} === 'ok' ? 'Success' : ${contain>outcome} === 'failed' ? 'Error' : ${contain>outcome} === 'dry-run' ? 'Information' : 'Warning' }"
+                                                                  icon="{= ${contain>outcome} === 'ok' ? 'sap-icon://accept' : ${contain>outcome} === 'failed' ? 'sap-icon://error' : ${contain>outcome} === 'dry-run' ? 'sap-icon://lab' : 'sap-icon://alert' }"/>
+                                                    <Text text="{contain>message}"/>
+                                                </cells>
+                                            </ColumnListItem>
+                                        </items>
+                                    </Table>
+                                </l:VerticalLayout>
+                            </Panel>
+
+                            <Panel headerText="{i18n>unlockTitle}" expandable="true" expanded="false"
+                                   class="sapUiSmallMarginTop">
+                                <!-- Wrap everything in an outer VBox: the bare
+                                     sap.m.Panel content area lets inline-block
+                                     children (Label, fixed-width Input,
+                                     CheckBox, Button) flow side-by-side, which
+                                     is what made "Target user email" + "Comment
+                                     / incident ticket" + their Inputs share a
+                                     row. A flex-column VBox forces one row
+                                     per child. Per-field sub-VBoxes keep the
+                                     Label tight to its Input. -->
+                                <VBox width="100%">
+                                    <MessageStrip text="{i18n>unlockHint}" type="Information" showIcon="true"/>
+
+                                    <VBox class="sapUiMediumMarginTop">
+                                        <Label text="{i18n>unlockLblIasTenantMulti}"/>
+                                        <MultiComboBox items="{iasTenants>/list}"
+                                                       selectedKeys="{contain>/unlockIasTenantIds}"
+                                                       placeholder="{i18n>unlockIasTenantAllHint}"
+                                                       width="100%"
+                                                       class="sapUiTinyMarginTop">
+                                            <core:Item key="{iasTenants>id}"
+                                                       text="{iasTenants>displayName} ({iasTenants>iasHost})"/>
+                                        </MultiComboBox>
+                                    </VBox>
+
+                                    <VBox class="sapUiMediumMarginTop">
+                                        <Label text="{i18n>unlockLblSubaccountMulti}"/>
+                                        <MultiComboBox items="{data>/subaccounts}"
+                                                       selectedKeys="{contain>/unlockSubaccountIds}"
+                                                       placeholder="{i18n>unlockSubaccountAllHint}"
+                                                       width="100%"
+                                                       class="sapUiTinyMarginTop">
+                                            <core:Item key="{data>id}" text="{data>cisDisplayName} ({data>region})"/>
+                                        </MultiComboBox>
+                                    </VBox>
+
+                                    <VBox class="sapUiMediumMarginTop">
+                                        <Label text="{i18n>contLblEmail}" required="true"/>
+                                        <Input value="{contain>/unlockEmail}" placeholder="target@example.com"
+                                               width="30rem" class="sapUiTinyMarginTop"/>
+                                    </VBox>
+
+                                    <VBox class="sapUiMediumMarginTop">
+                                        <Label text="{i18n>contLblComment}"/>
+                                        <Input value="{contain>/unlockComment}" placeholder="{i18n>contLblCommentPh}"
+                                               width="30rem" class="sapUiTinyMarginTop"/>
+                                    </VBox>
+
+                                    <VBox class="sapUiMediumMarginTop">
+                                        <CheckBox text="{i18n>unlockActIasActivate}"
+                                                  selected="{contain>/unlockActIasActivate}"/>
+                                        <CheckBox text="{i18n>unlockActIasRestoreGroups}"
+                                                  selected="{contain>/unlockActIasRestoreGroups}"/>
+                                        <CheckBox text="{i18n>unlockActXsuaaRestore}"
+                                                  selected="{contain>/unlockActXsuaaRestore}"/>
+                                        <CheckBox text="{i18n>unlockActCfRestore}"
+                                                  selected="{contain>/unlockActCfRestore}"/>
+                                    </VBox>
+
+                                    <HBox class="sapUiMediumMarginTop" alignItems="Center" width="100%">
+                                        <ToolbarSpacer/>
+                                        <Button text="{i18n>unlockPreviewBtn}"
+                                                icon="sap-icon://show"
+                                                press=".onPreviewUnlock"
+                                                busy="{contain>/unlockPreviewBusy}"
+                                                class="sapUiTinyMarginEnd"/>
+                                        <Button text="{i18n>unlockBtnTest}"
+                                                icon="sap-icon://lab"
+                                                press=".onTestUnlock"
+                                                class="sapUiTinyMarginEnd"/>
+                                        <Button text="{i18n>unlockBtn}" type="Emphasized"
+                                                icon="sap-icon://unlocked" press=".onRunUnlock"/>
+                                    </HBox>
+                                </VBox>
+
+                                <!-- Pre-unlock preview: what would be re-granted, per
+                                     (subaccount, origin), from the latest unconsumed
+                                     ROLE_COLLECTIONS snapshot. Read-only. -->
+                                <Panel headerText="{i18n>unlockPreviewTitle}"
+                                       expandable="true" expanded="true"
+                                       visible="{= !!${contain>/unlockPreview} &amp;&amp; ${contain>/unlockPreview}.length > 0 }"
+                                       class="sapUiSmallMarginTop">
+                                    <MessageStrip text="{i18n>unlockPreviewHint}"
+                                                  type="Information" showIcon="true"/>
+                                    <Table items="{contain>/unlockPreview}" inset="false"
+                                           class="sapUiTinyMarginTop">
+                                        <columns>
+                                            <Column><Text text="{i18n>colSubaccount}"/></Column>
+                                            <Column><Text text="{i18n>colOrigin}"/></Column>
+                                            <Column><Text text="{i18n>colRoleCollections}"/></Column>
+                                            <Column><Text text="{i18n>colNote}"/></Column>
+                                        </columns>
+                                        <items>
+                                            <ColumnListItem>
+                                                <cells>
+                                                    <Text text="{contain>displayName}"/>
+                                                    <Text text="{contain>origin}"/>
+                                                    <Text text="{contain>roleCollectionsText}"/>
+                                                    <Text text="{contain>note}"/>
+                                                </cells>
+                                            </ColumnListItem>
+                                        </items>
+                                    </Table>
+                                </Panel>
+                                <Panel headerText="Last unlock" expandable="true" expanded="true"
+                                       visible="{= !!${contain>/lastUnlock}}" class="sapUiSmallMarginTop">
+                                    <HBox alignItems="Center" class="sapUiTinyMarginBottom">
+                                        <ObjectStatus text="{contain>/lastUnlock/summaryText}"
+                                                      state="{contain>/lastUnlock/summaryState}"
+                                                      icon="{= ${contain>/lastUnlock/summaryState} === 'Error' ? 'sap-icon://error' : ${contain>/lastUnlock/summaryState} === 'Warning' ? 'sap-icon://alert' : 'sap-icon://accept' }"/>
+                                        <ObjectStatus text="dry-run" state="Warning"
+                                                      class="sapUiSmallMarginBegin"
+                                                      visible="{contain>/lastUnlock/dryRun}"/>
+                                    </HBox>
+                                    <Table items="{contain>/lastUnlock/allActions}" inset="false"
+                                           growing="true" growingThreshold="20"
+                                           sticky="ColumnHeaders"
+                                           noDataText="No actions ran."
+                                           class="sapUiTinyMarginTop">
+                                        <columns>
+                                            <Column width="8rem"><Text text="Scope"/></Column>
+                                            <Column><Text text="Target"/></Column>
+                                            <Column><Text text="{i18n>colAction}"/></Column>
+                                            <Column width="7rem"><Text text="{i18n>colOutcome}"/></Column>
+                                            <Column><Text text="Message"/></Column>
+                                        </columns>
+                                        <items>
+                                            <ColumnListItem>
+                                                <cells>
+                                                    <ObjectStatus text="{contain>scope}"
+                                                                  state="{= ${contain>scope} === 'IAS' ? 'Information' : 'None' }"
+                                                                  icon="{= ${contain>scope} === 'IAS' ? 'sap-icon://locked' : 'sap-icon://building' }"/>
+                                                    <ObjectIdentifier title="{contain>targetTitle}"
+                                                                      text="{contain>targetSub}"/>
+                                                    <Text text="{contain>action}"/>
+                                                    <ObjectStatus text="{contain>outcome}"
+                                                                  state="{= ${contain>outcome} === 'ok' ? 'Success' : ${contain>outcome} === 'failed' ? 'Error' : ${contain>outcome} === 'dry-run' ? 'Information' : 'Warning' }"
+                                                                  icon="{= ${contain>outcome} === 'ok' ? 'sap-icon://accept' : ${contain>outcome} === 'failed' ? 'sap-icon://error' : ${contain>outcome} === 'dry-run' ? 'sap-icon://lab' : 'sap-icon://alert' }"/>
+                                                    <Text text="{contain>message}"/>
+                                                </cells>
+                                            </ColumnListItem>
+                                        </items>
+                                    </Table>
+                                </Panel>
+                            </Panel>
+
+                            <Panel headerText="{i18n>contEventsTitle}" class="sapUiSmallMarginTop">
+                                <headerToolbar>
+                                    <OverflowToolbar>
+                                        <Title text="{i18n>contEventsTitle}" level="H3"/>
+                                        <ToolbarSpacer/>
+                                        <Button text="{i18n>btnRefresh}" icon="sap-icon://refresh"
+                                                press=".onRefreshContainmentEvents"/>
+                                    </OverflowToolbar>
+                                </headerToolbar>
+                                <Table items="{contain>/events}"
+                                       growing="true" growingThreshold="20"
+                                       sticky="ColumnHeaders">
+                                    <columns>
+                                        <Column><Text text="{i18n>colTime}"/></Column>
+                                        <Column><Text text="{i18n>colAction}"/></Column>
+                                        <Column><Text text="{i18n>colOutcome}"/></Column>
+                                        <Column><Text text="{i18n>colTarget}"/></Column>
+                                        <Column><Text text="{i18n>colActor}"/></Column>
+                                        <Column><Text text="{i18n>colScope}"/></Column>
+                                        <Column><Text text="{i18n>colError}"/></Column>
+                                    </columns>
+                                    <items>
+                                        <ColumnListItem>
+                                            <cells>
+                                                <Text text="{contain>startedAt}"/>
+                                                <Text text="{contain>action}"/>
+                                                <ObjectStatus text="{contain>outcome}"
+                                                              state="{= ${contain>outcome} === 'ok' ? 'Success' : ${contain>outcome} === 'failed' ? 'Error' : 'Warning' }"/>
+                                                <Text text="{contain>targetUserEmail}"/>
+                                                <Text text="{contain>actor}"/>
+                                                <Text text="{= ${contain>systemType} === 'SUBACCOUNT' ? (${contain>subaccountDisplayName} || '(unknown subaccount)') : ${contain>systemType} === 'IAS' ? (${contain>iasTenantName} || '(unknown IAS tenant)') : ${contain>systemType} === 'INTERNAL' ? '(global)' : (${contain>systemId} || '?') }"/>
+                                                <Text text="{contain>errorMessage}"/>
+                                            </cells>
+                                        </ColumnListItem>
+                                    </items>
+                                </Table>
+                            </Panel>
+                        </Panel>
+                    </VBox>
+
+                    <!-- ============ USER ANALYSIS PAGE ============ -->
+                    <!-- Where does this user have access? Aggregates IAS tenants,
+                         XSUAA shadow users + role collections (direct + via IAS
+                         group mapping), CF org/space roles. Read-only;
+                         responder + admin can use it.
+                         Two view modes: tables (dense, filterable) or
+                         networkgraph (visual, easier to spot anomalies). -->
+                    <VBox width="100%" class="btpcSection"
+                          xmlns:nwg="sap.suite.ui.commons.networkgraph"
+                          visible="{= ${nav>/currentPage} === 'userAnalysis' }">
+                        <Panel headerText="{i18n>userAnalysisTitle}" class="btpcPanel">
+                            <MessageStrip text="{i18n>userAnalysisHint}" type="Information" showIcon="true"/>
+                            <HBox class="sapUiSmallMarginTop" alignItems="Center">
+                                <Label text="{i18n>userAnalysisEmail}" class="sapUiTinyMarginEnd"/>
+                                <Input value="{userAnalysis>/email}"
+                                       placeholder="target@example.com"
+                                       width="22rem"
+                                       submit=".onRunUserAnalysis"/>
+                                <Button text="{i18n>userAnalysisRunBtn}" type="Emphasized"
+                                        icon="sap-icon://search"
+                                        press=".onRunUserAnalysis"
+                                        busy="{userAnalysis>/busy}"
+                                        class="sapUiTinyMarginBegin"/>
+                                <ToolbarSpacer/>
+                                <!-- View mode toggle. Tables stay the default; graph
+                                     is opt-in because it loads sap.suite.ui.commons
+                                     lazily and works best when the user has a
+                                     manageable number of assignments. -->
+                                <SegmentedButton selectedKey="{userAnalysis>/viewMode}"
+                                                 class="sapUiTinyMarginEnd">
+                                    <items>
+                                        <SegmentedButtonItem key="table" icon="sap-icon://table-view"
+                                                             tooltip="{i18n>userAnalysisViewTable}"/>
+                                        <SegmentedButtonItem key="graph" icon="sap-icon://org-chart"
+                                                             tooltip="{i18n>userAnalysisViewGraph}"/>
+                                    </items>
+                                </SegmentedButton>
+                                <Label text="{i18n>userAnalysisFilter}" class="sapUiTinyMarginEnd"/>
+                                <SearchField value="{userAnalysis>/filter}"
+                                             placeholder="{i18n>userAnalysisFilterPh}"
+                                             width="18rem"
+                                             liveChange=".onUserAnalysisFilterChange"/>
+                            </HBox>
+
+                            <!-- Graph view: networkgraph from sap.suite.ui.commons.
+                                 Nodes built client-side from the same /user-analysis
+                                 response that feeds the tables; one user node at
+                                 center, IAS tenant + subaccount branches. Layered
+                                 layout works best for the hub-and-spoke shape. -->
+                            <Panel headerText="{i18n>userAnalysisGraphSection}"
+                                   expandable="false"
+                                   visible="{= !!${userAnalysis>/lastReport} &amp;&amp; ${userAnalysis>/viewMode} === 'graph' }"
+                                   class="sapUiSmallMarginTop">
+                                <!-- LayoutAlgorithm omitted on purpose - networkgraph
+                                     uses LayeredLayout by default. Naming the layout
+                                     explicitly requires the sap.suite.ui.commons.
+                                     networkgraph.layout subpackage which isn't on
+                                     the public CDN (404 on LayeredLayout.js). Default
+                                     gives us the same layered shape without the load. -->
+                                <!-- Polished graph: bigger canvas, native zoom
+                                     toolbar, status legend hidden because the
+                                     node icons + statuses are self-explanatory.
+                                     Empty enableWheelZoom for trackpad-friendly
+                                     pinch-zoom UX. -->
+                                <!-- backgroundColor accepts an enum (White / Transparent /
+                                     etc.) - we tried a CSS variable and UI5 rejected it.
+                                     Default is fine; the theme picks the right tone. -->
+                                <nwg:Graph nodes="{userAnalysis>/graphNodes}"
+                                           lines="{userAnalysis>/graphLines}"
+                                           height="720px"
+                                           enableWheelZoom="true">
+                                    <nwg:nodes>
+                                        <!-- No `group` binding here; using it
+                                             without defining matching Group
+                                             objects throws "Node belonging to
+                                             a nonexistent group" at render
+                                             time. LayeredLayout positions the
+                                             nodes acceptably without grouping. -->
+                                        <nwg:Node key="{userAnalysis>key}"
+                                                  title="{userAnalysis>title}"
+                                                  description="{userAnalysis>description}"
+                                                  status="{userAnalysis>status}"
+                                                  icon="{userAnalysis>icon}"/>
+                                    </nwg:nodes>
+                                    <nwg:lines>
+                                        <nwg:Line from="{userAnalysis>from}"
+                                                  to="{userAnalysis>to}"/>
+                                    </nwg:lines>
+                                </nwg:Graph>
+                            </Panel>
+
+                            <!-- Summary banner -->
+                            <ObjectStatus class="sapUiSmallMarginTop"
+                                          visible="{= !!${userAnalysis>/lastReport} }"
+                                          text="{userAnalysis>/summaryText}"
+                                          state="{= ${userAnalysis>/tenantsHit} > 0 || ${userAnalysis>/subaccountsHit} > 0 ? 'Information' : 'None' }"/>
+
+                            <!-- IAS tenant section -->
+                            <Panel headerText="{i18n>userAnalysisIasSection}" expandable="true" expanded="true"
+                                   visible="{= !!${userAnalysis>/lastReport} &amp;&amp; ${userAnalysis>/viewMode} === 'table' }"
+                                   class="sapUiSmallMarginTop">
+                                <Table items="{userAnalysis>/tenants}" inset="false"
+                                       growing="true" growingThreshold="20"
+                                       sticky="ColumnHeaders"
+                                       noDataText="{i18n>userAnalysisNoTenants}">
+                                    <columns>
+                                        <Column><Text text="{i18n>colIasTenant}"/></Column>
+                                        <Column><Text text="{i18n>userAnalysisColPresence}"/></Column>
+                                        <Column><Text text="{i18n>userAnalysisColIasGroups}"/></Column>
+                                        <Column><Text text="{i18n>userAnalysisColError}"/></Column>
+                                    </columns>
+                                    <items>
+                                        <ColumnListItem>
+                                            <cells>
+                                                <ObjectIdentifier title="{userAnalysis>displayName}"
+                                                                  text="{userAnalysis>iasHost}"/>
+                                                <ObjectStatus text="{userAnalysis>presenceLabel}"
+                                                              state="{= ${userAnalysis>userFound} ? (${userAnalysis>iasUserActive} === false ? 'Warning' : 'Success') : 'None' }"
+                                                              icon="{= ${userAnalysis>userFound} ? (${userAnalysis>iasUserActive} === false ? 'sap-icon://locked' : 'sap-icon://accept') : 'sap-icon://decline' }"/>
+                                                <Text text="{userAnalysis>groupsText}"/>
+                                                <Text text="{userAnalysis>error}"/>
+                                            </cells>
+                                        </ColumnListItem>
+                                    </items>
+                                </Table>
+                            </Panel>
+
+                            <!-- Per-subaccount section -->
+                            <Panel headerText="{i18n>userAnalysisSubaccountSection}" expandable="true" expanded="true"
+                                   visible="{= !!${userAnalysis>/lastReport} &amp;&amp; ${userAnalysis>/viewMode} === 'table' }"
+                                   class="sapUiSmallMarginTop">
+                                <Table items="{userAnalysis>/subaccountRows}" inset="false"
+                                       growing="true" growingThreshold="20"
+                                       sticky="ColumnHeaders"
+                                       noDataText="{i18n>userAnalysisNoAssignments}">
+                                    <columns>
+                                        <Column><Text text="{i18n>colSubaccount}"/></Column>
+                                        <Column><Text text="{i18n>userAnalysisColSource}"/></Column>
+                                        <Column><Text text="{i18n>userAnalysisColAssignment}"/></Column>
+                                        <Column><Text text="{i18n>userAnalysisColContext}"/></Column>
+                                    </columns>
+                                    <items>
+                                        <ColumnListItem>
+                                            <cells>
+                                                <ObjectIdentifier title="{userAnalysis>subaccountName}"
+                                                                  text="{userAnalysis>region}"/>
+                                                <ObjectStatus text="{userAnalysis>source}"
+                                                              state="{= ${userAnalysis>source} === 'XSUAA (direct)' ? 'Information' : ${userAnalysis>source} === 'XSUAA (via IAS group)' ? 'Warning' : ${userAnalysis>source} === 'CF' ? 'Success' : 'None' }"/>
+                                                <Text text="{userAnalysis>assignment}"/>
+                                                <Text text="{userAnalysis>context}"/>
+                                            </cells>
+                                        </ColumnListItem>
+                                    </items>
+                                </Table>
+                            </Panel>
+
+                            <!-- Errors section, only shown when something failed -->
+                            <Panel headerText="{i18n>userAnalysisErrorsSection}"
+                                   expandable="true" expanded="false"
+                                   visible="{= ${userAnalysis>/errors}.length > 0 }"
+                                   class="sapUiSmallMarginTop">
+                                <List items="{userAnalysis>/errors}" inset="false">
+                                    <StandardListItem
+                                            title="{userAnalysis>subaccountName}"
+                                            description="{userAnalysis>message}"
+                                            icon="sap-icon://alert"/>
+                                </List>
+                            </Panel>
+                        </Panel>
+                    </VBox>
+
+                    <!-- ============ HEALTH PAGE ============ -->
+                    <VBox width="100%" class="btpcSection" visible="{= ${nav>/currentPage} === 'health' }">
+                        <Panel headerText="{i18n>healthPageTitle}" class="btpcPanel">
+                            <MessageStrip text="{i18n>healthMatrixHint}" type="Information" showIcon="true"/>
+                            <HBox class="sapUiSmallMarginTop" alignItems="Center">
+                                <Button text="{i18n>healthRunNow}" type="Emphasized"
+                                        icon="sap-icon://stethoscope" press=".onRunHealthCheck"
+                                        enabled="{= !${health>/busy} }"/>
+                                <Text text="{= ${health>/report/correlationId} ? ('last run ' + ${health>/report/finishedAt} + '    ' + ${health>/report/okProbes} + '/' + ${health>/report/totalProbes} + ' OK') : 'no run yet' }"
+                                      class="sapUiSmallMarginBegin"/>
+                                <ToolbarSpacer/>
+                                <Text text="{i18n>healthAutoLink}" class="sapUiTinyMarginEnd"/>
+                                <Button text="{i18n>healthGoAdmin}"
+                                        icon="sap-icon://settings"
+                                        type="Transparent"
+                                        press=".onGoToAdmin"/>
+                            </HBox>
+                            <Panel headerText="{i18n>healthPerSubaccount}" expandable="true" expanded="true"
+                                   class="sapUiSmallMarginTop"
+                                   visible="{= !!${health>/report} }">
+                                <!-- Flat table: one row per (subaccount, probe).
+                                     The subaccount name repeats so the table
+                                     stays sortable. Growing for big landscapes
+                                     (4 probes - 250 subaccounts = 1000 rows). -->
+                                <Table items="{health>/report/perSubaccountFlat}" inset="false"
+                                       growing="true" growingThreshold="20"
+                                       sticky="ColumnHeaders"
+                                       noDataText="No probes in this run.">
+                                    <columns>
+                                        <Column><Text text="{i18n>colSubaccount}"/></Column>
+                                        <Column><Text text="Credential"/></Column>
+                                        <Column><Text text="{i18n>colOutcome}"/></Column>
+                                        <Column><Text text="Latency (ms)"/></Column>
+                                        <Column><Text text="Message"/></Column>
+                                    </columns>
+                                    <items>
+                                        <ColumnListItem>
+                                            <cells>
+                                                <Text text="{health>displayName}"/>
+                                                <Text text="{health>kind}"/>
+                                                <ObjectStatus text="{health>outcome}"
+                                                              state="{= ${health>outcome} === 'ok' ? 'Success' : ${health>outcome} === 'failed' ? 'Error' : 'Warning' }"/>
+                                                <Text text="{= ${health>latencyMs} === null ? '-' : ${health>latencyMs} }"/>
+                                                <Text text="{health>message}"/>
+                                            </cells>
+                                        </ColumnListItem>
+                                    </items>
+                                </Table>
+                            </Panel>
+                            <Panel headerText="{i18n>healthPerTenant}" expandable="true" expanded="true"
+                                   class="sapUiSmallMarginTop"
+                                   visible="{= !!${health>/report} &amp;&amp; ${health>/report/perTenantFlat}.length > 0 }">
+                                <Table items="{health>/report/perTenantFlat}" inset="false"
+                                       growing="true" growingThreshold="20"
+                                       sticky="ColumnHeaders"
+                                       noDataText="No IAS tenants in this run.">
+                                    <columns>
+                                        <Column><Text text="{i18n>colIasTenant}"/></Column>
+                                        <Column><Text text="{i18n>colOutcome}"/></Column>
+                                        <Column><Text text="Latency (ms)"/></Column>
+                                        <Column><Text text="Message"/></Column>
+                                    </columns>
+                                    <items>
+                                        <ColumnListItem>
+                                            <cells>
+                                                <ObjectIdentifier title="{health>displayName}"
+                                                                  text="{health>iasHost}"/>
+                                                <ObjectStatus text="{health>outcome}"
+                                                              state="{= ${health>outcome} === 'ok' ? 'Success' : ${health>outcome} === 'failed' ? 'Error' : 'Warning' }"/>
+                                                <Text text="{= ${health>latencyMs} === null ? '-' : ${health>latencyMs} }"/>
+                                                <Text text="{health>message}"/>
+                                            </cells>
+                                        </ColumnListItem>
+                                    </items>
+                                </Table>
+                            </Panel>
+                            <Panel headerText="{i18n>healthPerCentralKey}" expandable="true" expanded="true"
+                                   class="sapUiSmallMarginTop"
+                                   visible="{= !!${health>/report} &amp;&amp; ${health>/report/perCentralKeyFlat}.length > 0 }">
+                                <Table items="{health>/report/perCentralKeyFlat}" inset="false"
+                                       growing="true" growingThreshold="20"
+                                       sticky="ColumnHeaders"
+                                       noDataText="No central-viewer keys saved.">
+                                    <columns>
+                                        <Column><Text text="{i18n>colCentralKey}"/></Column>
+                                        <Column><Text text="{i18n>colGaName}"/></Column>
+                                        <Column><Text text="{i18n>colOutcome}"/></Column>
+                                        <Column><Text text="Latency (ms)"/></Column>
+                                        <Column><Text text="Message"/></Column>
+                                    </columns>
+                                    <items>
+                                        <ColumnListItem>
+                                            <cells>
+                                                <Text text="{health>label}"/>
+                                                <Text text="{health>globalAccountName}"/>
+                                                <ObjectStatus text="{health>outcome}"
+                                                              state="{= ${health>outcome} === 'ok' ? 'Success' : ${health>outcome} === 'failed' ? 'Error' : 'Warning' }"/>
+                                                <Text text="{= ${health>latencyMs} === null ? '-' : ${health>latencyMs} }"/>
+                                                <Text text="{health>message}"/>
+                                            </cells>
+                                        </ColumnListItem>
+                                    </items>
+                                </Table>
+                            </Panel>
+                        </Panel>
+                    </VBox>
+
+                    <!-- ============ SOD PAGE ============ -->
+                    <VBox width="100%" class="btpcSection" visible="{= ${nav>/currentPage} === 'sod' }">
+                        <Panel headerText="{i18n>riskRulesTitle}" class="btpcPanel">
+                            <headerToolbar>
+                                <OverflowToolbar>
+                                    <Title text="{i18n>riskRulesTitle}" level="H2"/>
+                                    <ToolbarSpacer/>
+                                    <Button text="{i18n>btnRefresh}" icon="sap-icon://refresh" press=".onRefreshConflictSets"/>
+                                    <Button text="{i18n>riskBtnAddRule}" icon="sap-icon://add" type="Emphasized" press=".onOpenAddConflict"
+                                            visible="{shell>/isAdmin}"/>
+                                </OverflowToolbar>
+                            </headerToolbar>
+                            <MessageStrip text="{i18n>riskRulesHint}" type="Information" showIcon="true"/>
+                            <Table items="{sod>/conflictSets}"
+                                   growing="true" growingThreshold="20"
+                                   sticky="ColumnHeaders"
+                                   noDataText="No risk rules. Add one, or wait for the built-in catalog to seed on first start.">
+                                <columns>
+                                    <Column><Text text="{i18n>sodColName}"/></Column>
+                                    <Column><Text text="{i18n>riskColKind}"/></Column>
+                                    <Column><Text text="{i18n>sodColSeverity}"/></Column>
+                                    <Column><Text text="{i18n>sodColScope}"/></Column>
+                                    <Column><Text text="{i18n>riskColRule}"/></Column>
+                                    <Column><Text text="{i18n>sodColEnabled}"/></Column>
+                                    <Column hAlign="End"><Text text="{i18n>colActions}"/></Column>
+                                </columns>
+                                <items>
+                                    <ColumnListItem>
+                                        <cells>
+                                            <VBox>
+                                                <Text text="{sod>name}"/>
+                                                <Text text="{sod>description}" class="sapUiTinyMarginTop"/>
+                                            </VBox>
+                                            <ObjectStatus text="{sod>kind}"
+                                                          state="{= ${sod>kind} === 'critical' ? 'Error' : ${sod>kind} === 'threshold' ? 'Warning' : 'Information' }"/>
+                                            <ObjectStatus text="{sod>severity}"
+                                                          state="{= ${sod>severity} === 'critical' ? 'Error' : ${sod>severity} === 'high' ? 'Warning' : 'Information' }"/>
+                                            <Text text="{sod>scopeLevel}"/>
+                                            <Text text="{= ${sod>kind} === 'threshold' ? ('count ' + ${sod>thresholdCount} + ' ' + (${sod>roleCollections}.length === 0 ? '(any RC)' : 'of: ' + ${sod>roleCollections}.join(', '))) : ${sod>roleCollections}.join(', ') }"/>
+                                            <Switch state="{sod>enabled}" change=".onToggleConflictEnabled"/>
+                                            <HBox>
+                                                <Button icon="sap-icon://edit" type="Transparent" press=".onOpenEditConflict"
+                                                        tooltip="{i18n>sodBtnEditSet}"/>
+                                                <Button icon="sap-icon://delete" type="Transparent" press=".onDeleteConflict"
+                                                        tooltip="{i18n>sodBtnDeleteSet}"/>
+                                            </HBox>
+                                        </cells>
+                                    </ColumnListItem>
+                                </items>
+                            </Table>
+                        </Panel>
+
+                        <Panel headerText="{i18n>sodScanTitle}" class="btpcPanel">
+                            <MessageStrip text="{i18n>sodScanHint}" type="Information" showIcon="true"/>
+                            <Label text="{i18n>contLblSubaccount}" required="true" class="sapUiSmallMarginTop"/>
+                            <Select items="{data>/subaccounts}" selectedKey="{sod>/scanSubaccountId}" width="100%">
+                                <core:Item key="{data>id}"
+                                           text="{data>cisDisplayName} ({data>region}) XSUAA {= ${data>capabilities/xsuaaApiaccess} ? '' : ' (cannot scan)' }"/>
+                            </Select>
+                            <Button text="{i18n>sodBtnRunScan}" type="Emphasized" icon="sap-icon://compare"
+                                    press=".onRunSodScan" class="sapUiSmallMarginTop"/>
+
+                            <Panel headerText="Scan result" expandable="true" expanded="true"
+                                   visible="{= !!${sod>/lastScan}}" class="sapUiSmallMarginTop">
+                                <Text text="subaccount: {sod>/lastScan/subaccountDisplayName}  users scanned: {sod>/lastScan/usersScanned} findings: {= ${sod>/lastScan/findings}.length }"/>
+                                <Text text="{sod>/lastScan/message}" visible="{= !!${sod>/lastScan/message}}"/>
+                                <Table items="{sod>/lastScan/findings}" inset="false"
+                                       growing="true" growingThreshold="20"
+                                       sticky="ColumnHeaders"
+                                       noDataText="{i18n>sodNoFindings}">
+                                    <columns>
+                                        <Column><Text text="{i18n>sodColTarget}"/></Column>
+                                        <Column><Text text="{i18n>riskColKind}"/></Column>
+                                        <Column><Text text="{i18n>sodColConflict}"/></Column>
+                                        <Column><Text text="{i18n>sodColSeverity}"/></Column>
+                                        <Column><Text text="{i18n>riskColScopeCtx}"/></Column>
+                                        <Column><Text text="{i18n>sodColMatched}"/></Column>
+                                        <Column hAlign="End"><Text text="{i18n>sodColRemediate}"/></Column>
+                                    </columns>
+                                    <items>
+                                        <ColumnListItem>
+                                            <cells>
+                                                <VBox>
+                                                    <Text text="{sod>userEmail}"/>
+                                                    <Text text="{sod>userIasId}" class="sapUiTinyMarginTop"/>
+                                                </VBox>
+                                                <ObjectStatus text="{sod>kind}"
+                                                              state="{= ${sod>kind} === 'critical' ? 'Error' : ${sod>kind} === 'threshold' ? 'Warning' : 'Information' }"/>
+                                                <Text text="{sod>conflictSetName}"/>
+                                                <ObjectStatus text="{sod>severity}"
+                                                              state="{= ${sod>severity} === 'critical' ? 'Error' : ${sod>severity} === 'high' ? 'Warning' : 'Information' }"/>
+                                                <Text text="{sod>scopeContext}"/>
+                                                <Text text="{= ${sod>matchedRoleCollections}.join(', ') }"/>
+                                                <Button text="{i18n>sodBtnContainUser}" icon="sap-icon://shield"
+                                                        press=".onContainFromFinding"/>
+                                            </cells>
+                                        </ColumnListItem>
+                                    </items>
+                                </Table>
+                            </Panel>
+                        </Panel>
+                    </VBox>
+
+                    <!-- ============ PROTECTED USERS PAGE ============ -->
+                    <VBox width="100%" class="btpcSection" visible="{= ${nav>/currentPage} === 'protected' }">
+                        <Panel headerText="{i18n>titleProtected}" class="btpcPanel">
+                            <headerToolbar>
+                                <OverflowToolbar>
+                                    <Title text="{i18n>titleProtected}" level="H2"/>
+                                    <ToolbarSpacer/>
+                                    <Button text="{i18n>btnRefresh}" icon="sap-icon://refresh" press=".onRefreshProtected"/>
+                                    <Button text="{i18n>btnAddProtection}" icon="sap-icon://add" type="Emphasized" press=".onOpenAddProtection"
+                                            visible="{shell>/isAdmin}"/>
+                                </OverflowToolbar>
+                            </headerToolbar>
+
+                            <Table id="protectedTable" items="{data>/protected}"
+                                   growing="true" growingThreshold="20"
+                                   sticky="ColumnHeaders"
+                                   noDataText="No protected users yet add break-glass admins, the incident responder, and anyone else who must never be locked.">
+                                <columns>
+                                    <Column><Text text="{i18n>colUserEmail}"/></Column>
+                                    <Column><Text text="{i18n>colScope}"/></Column>
+                                    <Column><Text text="{i18n>colReason}"/></Column>
+                                    <Column><Text text="{i18n>colOrigin}"/></Column>
+                                    <Column><Text text="{i18n>colExpires}"/></Column>
+                                    <Column><Text text="{i18n>colAdded}"/></Column>
+                                    <Column><Text text="{i18n>colStatus}"/></Column>
+                                    <Column hAlign="End"><Text text="{i18n>colActions}"/></Column>
+                                </columns>
+                                <items>
+                                    <ColumnListItem>
+                                        <cells>
+                                            <Text text="{data>userEmail}"/>
+                                            <Text text="{parts: ['data>subaccountId','data>iasTenantId'], formatter: '.fmtScope'}"/>
+                                            <Text text="{data>reason}"/>
+                                            <ObjectStatus text="{data>origin}" state="Information"/>
+                                            <Text text="{data>expiresAt}"/>
+                                            <VBox>
+                                                <Text text="{data>addedBy}"/>
+                                                <Text text="{data>addedAt}" class="sapUiTinyMarginTop"/>
+                                            </VBox>
+                                            <ObjectStatus text="{= ${data>enabled} ? 'active' : 'disabled' }"
+                                                          state="{= ${data>enabled} ? 'Success' : 'Error' }"/>
+                                            <Button icon="sap-icon://delete" type="Transparent" press=".onDisableProtection"
+                                                    visible="{shell>/isAdmin}"
+                                                    tooltip="{i18n>btnDeleteProtection}"/>
+                                        </cells>
+                                    </ColumnListItem>
+                                </items>
+                            </Table>
+                        </Panel>
+                    </VBox>
+
+                    <!-- ============ CERTIFICATES PAGE ============ -->
+                    <!-- Inventory of every stored X.509 cert (IAS Application
+                         binding, CF technical-user P12). Shows expiry +
+                         days-remaining so the operator can rotate before a
+                         containment call breaks because the cert went stale. -->
+                    <VBox width="100%" class="btpcSection" visible="{= ${nav>/currentPage} === 'certificates' }">
+                        <Panel headerText="{i18n>certInventoryTitle}" class="btpcPanel">
+                            <MessageStrip text="{i18n>certInventoryHint}" type="Information" showIcon="true"/>
+                            <MessageStrip text="{= ${certs>/expiringSoon} + ' certificate(s) expire within 30 days.' }"
+                                          type="Warning" showIcon="true"
+                                          visible="{= ${certs>/expiringSoon} > 0 }"
+                                          class="sapUiTinyMarginTop"/>
+                            <HBox class="sapUiSmallMarginTop">
+                                <ToolbarSpacer/>
+                                <Button text="{i18n>btnRefresh}" icon="sap-icon://refresh"
+                                        press=".loadCertificates" busy="{certs>/busy}"/>
+                            </HBox>
+                            <Table items="{certs>/rows}" inset="false"
+                                   growing="true" growingThreshold="20"
+                                   sticky="ColumnHeaders"
+                                   noDataText="{i18n>certInventoryEmpty}"
+                                   class="sapUiTinyMarginTop">
+                                <columns>
+                                    <Column><Text text="{i18n>colCertSource}"/></Column>
+                                    <Column><Text text="{i18n>colCertLabel}"/></Column>
+                                    <Column><Text text="{i18n>colCertSubject}"/></Column>
+                                    <Column><Text text="{i18n>colCertNotAfter}"/></Column>
+                                    <Column><Text text="{i18n>colCertDaysLeft}"/></Column>
+                                    <Column><Text text="{i18n>colCertStatus}"/></Column>
+                                </columns>
+                                <items>
+                                    <ColumnListItem>
+                                        <cells>
+                                            <Text text="{certs>source}"/>
+                                            <ObjectIdentifier title="{certs>label}" text="{certs>sublabel}"/>
+                                            <Text text="{certs>subject}"/>
+                                            <Text text="{certs>notAfter}"/>
+                                            <Text text="{= ${certs>daysUntilExpiry} === null ? '-' : ${certs>daysUntilExpiry} }"/>
+                                            <ObjectStatus text="{certs>status}"
+                                                          state="{= ${certs>status} === 'expired' ? 'Error' : ${certs>status} === 'expiring' ? 'Warning' : ${certs>status} === 'unparseable' ? 'Error' : 'Success' }"/>
+                                        </cells>
+                                    </ColumnListItem>
+                                </items>
+                            </Table>
+                        </Panel>
+                    </VBox>
+
+                    <!-- ============ ADMIN PAGE ============ -->
+                    <!-- Infrastructure config (audit log forwarding, external-email
+                         allowlist). User-scoped settings (dev-auth, server state)
+                         stay in the avatar > Settings dialog. -->
+                    <VBox width="100%" class="btpcSection" visible="{= ${nav>/currentPage} === 'admin' }">
+                        <Panel headerText="{i18n>settingsAuditSinksSection}" class="btpcPanel">
+                            <MessageStrip text="{i18n>settingsAuditSinksHint}" type="Information" showIcon="true"/>
+
+                            <Panel headerText="{i18n>settingsSplunkTitle}" expandable="true" expanded="true"
+                                   class="sapUiTinyMarginTop">
+                                <l:VerticalLayout xmlns:l="sap.ui.layout" width="100%" class="sapUiContentPadding">
+                                    <HBox>
+                                        <CheckBox text="{i18n>settingsEnabled}" selected="{sinks>/splunk/enabled}"/>
+                                        <ToolbarSpacer/>
+                                        <ObjectStatus text="{sinks>/splunk/lastTestStatus}"
+                                                      state="{= ${sinks>/splunk/lastTestStatus} === 'ok' ? 'Success' : ${sinks>/splunk/lastTestStatus} === 'failed' ? 'Error' : 'None' }"
+                                                      visible="{= !!${sinks>/splunk/lastTestStatus} }"/>
+                                    </HBox>
+                                    <Label text="{i18n>splunkUrl}" required="true" class="sapUiTinyMarginTop"/>
+                                    <Input value="{sinks>/splunk/config/url}"
+                                           placeholder="https://splunk.example.com:8088"/>
+                                    <Label text="{i18n>splunkToken}" required="true" class="sapUiTinyMarginTop"/>
+                                    <Input value="{sinks>/splunk/secret}" type="Password"
+                                           placeholder="{= ${sinks>/splunk/hasSecret} ? ${i18n>secretKeepHint} : '' }"/>
+                                    <l:HorizontalLayout>
+                                        <l:VerticalLayout>
+                                            <Label text="{i18n>splunkIndex}" class="sapUiTinyMarginTop"/>
+                                            <Input value="{sinks>/splunk/config/index}" width="14rem"/>
+                                        </l:VerticalLayout>
+                                        <l:VerticalLayout class="sapUiSmallMarginBegin">
+                                            <Label text="{i18n>splunkSourcetype}" class="sapUiTinyMarginTop"/>
+                                            <Input value="{sinks>/splunk/config/sourcetype}"
+                                                   placeholder="btp:containment" width="14rem"/>
+                                        </l:VerticalLayout>
+                                        <l:VerticalLayout class="sapUiSmallMarginBegin">
+                                            <Label text="{i18n>splunkSource}" class="sapUiTinyMarginTop"/>
+                                            <Input value="{sinks>/splunk/config/source}"
+                                                   placeholder="btp-containment" width="14rem"/>
+                                        </l:VerticalLayout>
+                                    </l:HorizontalLayout>
+                                    <HBox class="sapUiSmallMarginTop">
+                                        <Text text="{sinks>/splunk/lastTestMessage}"/>
+                                        <ToolbarSpacer/>
+                                        <Button text="{i18n>btnTestConnection}" press=".onTestAuditSink('splunk_hec')"
+                                                class="sapUiTinyMarginEnd"/>
+                                        <Button text="{i18n>btnSave}" type="Emphasized"
+                                                press=".onSaveAuditSink('splunk_hec')"/>
+                                    </HBox>
+                                </l:VerticalLayout>
+                            </Panel>
+
+                            <Panel headerText="{i18n>settingsBtpAuditTitle}" expandable="true" expanded="false"
+                                   class="sapUiTinyMarginTop">
+                                <l:VerticalLayout xmlns:l="sap.ui.layout" width="100%" class="sapUiContentPadding">
+                                    <HBox>
+                                        <CheckBox text="{i18n>settingsEnabled}" selected="{sinks>/btp/enabled}"/>
+                                        <ToolbarSpacer/>
+                                        <ObjectStatus text="{sinks>/btp/lastTestStatus}"
+                                                      state="{= ${sinks>/btp/lastTestStatus} === 'ok' ? 'Success' : ${sinks>/btp/lastTestStatus} === 'failed' ? 'Error' : 'None' }"
+                                                      visible="{= !!${sinks>/btp/lastTestStatus} }"/>
+                                    </HBox>
+                                    <Label text="{i18n>btpAuditServiceKey}" required="true" class="sapUiTinyMarginTop"/>
+                                    <TextArea value="{sinks>/btp/secret}" rows="5" width="100%"
+                                              placeholder="{= ${sinks>/btp/hasSecret} ? ${i18n>secretKeepHint} : ${i18n>btpAuditServiceKeyPh} }"/>
+                                    <HBox class="sapUiSmallMarginTop">
+                                        <Text text="{sinks>/btp/lastTestMessage}"/>
+                                        <ToolbarSpacer/>
+                                        <Button text="{i18n>btnTestConnection}" press=".onTestAuditSink('btp_audit_log')"
+                                                class="sapUiTinyMarginEnd"/>
+                                        <Button text="{i18n>btnSave}" type="Emphasized"
+                                                press=".onSaveAuditSink('btp_audit_log')"/>
+                                    </HBox>
+                                </l:VerticalLayout>
+                            </Panel>
+                        </Panel>
+
+                        <Panel headerText="{i18n>settingsHealthAutoSection}" class="btpcPanel">
+                            <l:VerticalLayout xmlns:l="sap.ui.layout" width="100%" class="sapUiContentPadding">
+                                <Text text="{i18n>settingsHealthAutoHint}"/>
+                                <Label text="{i18n>settingsHealthAutoIntervalLabel}" class="sapUiSmallMarginTop"/>
+                                <Input value="{appcfg>/healthAutoIntervalSeconds}"
+                                       type="Number" width="10rem"
+                                       placeholder="0"/>
+                                <HBox class="sapUiTinyMarginTop">
+                                    <ToolbarSpacer/>
+                                    <Button text="{i18n>btnSave}" type="Emphasized"
+                                            press=".onSaveHealthAutoInterval"/>
+                                </HBox>
+                            </l:VerticalLayout>
+                        </Panel>
+
+                        <Panel headerText="{i18n>settingsOriginProfilesSection}" class="btpcPanel">
+                            <l:VerticalLayout xmlns:l="sap.ui.layout" width="100%" class="sapUiContentPadding">
+                                <Text text="{i18n>settingsOriginProfilesHint}"/>
+                                <HBox class="sapUiSmallMarginTop">
+                                    <ToolbarSpacer/>
+                                    <Button text="{i18n>btnNewOriginProfile}" icon="sap-icon://add"
+                                            press=".onNewOriginProfile"/>
+                                </HBox>
+                                <Table items="{profiles>/list}" class="sapUiTinyMarginTop"
+                                       growing="true" growingThreshold="20"
+                                       sticky="ColumnHeaders"
+                                       noDataText="{i18n>originProfileEmpty}">
+                                    <columns>
+                                        <Column><Text text="{i18n>colName}"/></Column>
+                                        <Column><Text text="{i18n>colDescription}"/></Column>
+                                        <Column><Text text="{i18n>colKeys}"/></Column>
+                                        <Column hAlign="End"><Text text="{i18n>colActions}"/></Column>
+                                    </columns>
+                                    <items>
+                                        <ColumnListItem>
+                                            <cells>
+                                                <Text text="{profiles>name}"/>
+                                                <Text text="{profiles>description}"/>
+                                                <Text text="{= ${profiles>originKeys}.join(', ') }"/>
+                                                <HBox>
+                                                    <Button icon="sap-icon://edit" type="Transparent"
+                                                            press=".onEditOriginProfile"/>
+                                                    <Button icon="sap-icon://delete" type="Transparent"
+                                                            press=".onDeleteOriginProfile"/>
+                                                </HBox>
+                                            </cells>
+                                        </ColumnListItem>
+                                    </items>
+                                </Table>
+                                <Panel headerText="{i18n>originProfileEditTitle}" expandable="true" expanded="true"
+                                       visible="{= !!${profiles>/editing} }"
+                                       class="sapUiSmallMarginTop">
+                                    <l:VerticalLayout width="100%" class="sapUiContentPadding">
+                                        <Label text="{i18n>colName}" required="true"/>
+                                        <Input value="{profiles>/editing/name}" width="30rem"
+                                               placeholder="all-ias-mapped"/>
+                                        <Label text="{i18n>colDescription}" class="sapUiTinyMarginTop"/>
+                                        <Input value="{profiles>/editing/description}" width="40rem"
+                                               placeholder="Optional"/>
+
+                                        <!-- Discover origins from one or more subaccounts via
+                                             /api/v1/xsuaa/identity-providers (same call the
+                                             containment form uses) and tick the ones to include.
+                                             Empty subaccount picker -> discover across every
+                                             enrolled subaccount. -->
+                                        <Label text="{i18n>profileDiscoverFromLabel}"
+                                               class="sapUiSmallMarginTop"/>
+                                        <HBox class="sapUiTinyMarginTop" alignItems="Center">
+                                            <MultiComboBox items="{data>/subaccounts}"
+                                                           selectedKeys="{profiles>/editing/discoverSubaccountIds}"
+                                                           placeholder="{i18n>contSubaccountAllHint}"
+                                                           width="30rem">
+                                                <core:Item key="{data>id}"
+                                                           text="{data>cisDisplayName} ({data>region})"/>
+                                            </MultiComboBox>
+                                            <Button text="{i18n>btnDiscoverOrigins}"
+                                                    icon="sap-icon://search"
+                                                    press=".onDiscoverOriginsForProfile"
+                                                    busy="{profiles>/editing/discoverBusy}"
+                                                    class="sapUiTinyMarginBegin"/>
+                                        </HBox>
+                                        <MessageStrip type="Warning" showIcon="true"
+                                                      visible="{= (${profiles>/editing/discoverErrors} || []).length > 0 }"
+                                                      text="{= ((${profiles>/editing/discoverErrors} || []).length) + ' subaccount(s) skipped during discovery - see browser console.' }"
+                                                      class="sapUiTinyMarginTop"/>
+
+                                        <Label text="{i18n>profileDiscoveredKeysLabel}" required="true"
+                                               class="sapUiSmallMarginTop"/>
+                                        <MultiComboBox items="{profiles>/editing/discoveredOrigins}"
+                                                       selectedKeys="{profiles>/editing/selectedDiscoveredKeys}"
+                                                       placeholder="{i18n>profileDiscoveredKeysHint}"
+                                                       width="40rem"
+                                                       class="sapUiTinyMarginTop">
+                                            <core:Item key="{profiles>originKey}"
+                                                       text="{profiles>originKey} - {profiles>name} ({profiles>type})"/>
+                                        </MultiComboBox>
+                                        <Text text="{= 'Picker carries ' + (${profiles>/editing/discoveredOrigins} || []).length + ' origin(s), ' + (${profiles>/editing/selectedDiscoveredKeys} || []).length + ' selected.' }"
+                                              class="sapUiTinyMarginTop"/>
+
+                                        <Label text="{i18n>profileExtraKeysLabel}"
+                                               class="sapUiSmallMarginTop"/>
+                                        <TextArea value="{profiles>/editing/extraKeysCsv}"
+                                                  rows="2" width="40rem"
+                                                  placeholder="ias, sap.default, subaccount-b-platform"/>
+                                        <Text text="{i18n>profileExtraKeysHint}" class="sapUiTinyMarginTop"/>
+                                        <HBox class="sapUiTinyMarginTop">
+                                            <ToolbarSpacer/>
+                                            <Button text="{i18n>btnCancel}" class="sapUiTinyMarginEnd"
+                                                    press=".onCancelEditOriginProfile"/>
+                                            <Button text="{i18n>btnSave}" type="Emphasized"
+                                                    press=".onSaveOriginProfileEdit"/>
+                                        </HBox>
+                                    </l:VerticalLayout>
+                                </Panel>
+                            </l:VerticalLayout>
+                        </Panel>
+
+                        <Panel headerText="{i18n>settingsExtEmailSection}" class="btpcPanel">
+                            <l:VerticalLayout xmlns:l="sap.ui.layout" width="100%" class="sapUiContentPadding">
+                                <Text text="{i18n>settingsExtEmailHint}"/>
+                                <Label text="{i18n>settingsExtEmailDomainsLabel}" class="sapUiSmallMarginTop"/>
+                                <TextArea value="{appcfg>/externalEmailDomains}" rows="3" width="100%"
+                                          placeholder="example.com, sap.com, agp-security.com"/>
+                                <HBox class="sapUiTinyMarginTop">
+                                    <ToolbarSpacer/>
+                                    <Button text="{i18n>settingsExtEmailSave}" type="Emphasized"
+                                            press=".onSaveExternalEmailDomains"/>
+                                </HBox>
+                            </l:VerticalLayout>
+                        </Panel>
+                    </VBox>
+                </Page>
+            </tnt:mainContents>
+        </tnt:ToolPage>
+    </App>
+</mvc:View>

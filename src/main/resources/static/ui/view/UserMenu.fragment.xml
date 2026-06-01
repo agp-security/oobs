@@ -1,0 +1,22 @@
+<!--
+  SPDX-License-Identifier: AGPL-3.0-only
+  Copyright 2026 Jan-Luca Gruber
+-->
+<core:FragmentDefinition
+    xmlns="sap.m"
+    xmlns:core="sap.ui.core">
+
+    <Popover placement="Bottom" showHeader="true" title="{shell>/userLabel}" contentWidth="20rem">
+        <content>
+            <List>
+                <DisplayListItem label="Scopes" value="{shell>/scopesLabel}"/>
+                <StandardListItem title="{i18n>shellSettings}" icon="sap-icon://action-settings"
+                                  type="Active" press=".onOpenSettings"/>
+                <StandardListItem title="{i18n>shellAbout}" icon="sap-icon://hint"
+                                  type="Active" press=".onOpenAbout"/>
+                <StandardListItem title="{i18n>shellLogout}" icon="sap-icon://log"
+                                  type="Active" press=".onLogout"/>
+            </List>
+        </content>
+    </Popover>
+</core:FragmentDefinition>

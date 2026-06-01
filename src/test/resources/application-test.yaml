@@ -1,0 +1,13 @@
+btpc:
+  dev-auth:
+    enabled: true
+  security:
+    allowed-host-suffixes: .hana.ondemand.com,.cloud.sap,.accounts.ondemand.com,.trial-accounts.ondemand.com,127.0.0.1,localhost
+  discovery:
+    scheduler-enabled: false
+    tick-seconds: 3600
+
+logging:
+  level:
+    ninja.gruber.btpc: DEBUG
+    org.flywaydb: INFO

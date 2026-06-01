@@ -1,0 +1,19 @@
+spring:
+  web:
+    resources:
+      add-mappings: false
+
+btpc:
+  dev-auth:
+    enabled: false
+  security:
+    allowed-host-suffixes: .hana.ondemand.com,.cloud.sap,.accounts.ondemand.com,.trial-accounts.ondemand.com
+    max-request-bytes: 131072
+  discovery:
+    scheduler-enabled: true
+    tick-seconds: 300
+
+logging:
+  level:
+    ninja.gruber.btpc: DEBUG
+    org.springframework.security: INFO

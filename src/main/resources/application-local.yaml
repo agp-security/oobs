@@ -1,0 +1,22 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/btpc
+    username: btpc
+    password: btpc
+    hikari:
+      maximum-pool-size: 5
+
+btpc:
+  dev-auth:
+    enabled: true
+  security:
+    allowed-host-suffixes: .hana.ondemand.com,.cloud.sap,.accounts.ondemand.com,.trial-accounts.ondemand.com,127.0.0.1,localhost
+    max-request-bytes: 131072
+  discovery:
+    scheduler-enabled: true
+    tick-seconds: 300
+
+logging:
+  level:
+    ninja.gruber.btpc: DEBUG
+    org.flywaydb: INFO

@@ -1,0 +1,67 @@
+<!--
+  SPDX-License-Identifier: AGPL-3.0-only
+  Copyright 2026 Jan-Luca Gruber
+-->
+<core:FragmentDefinition
+    xmlns="sap.m"
+    xmlns:l="sap.ui.layout"
+    xmlns:core="sap.ui.core">
+
+    <Dialog title="{i18n>dlgConflictTitle}" contentWidth="42rem" stretchOnPhone="true">
+        <content>
+            <l:VerticalLayout width="100%" class="sapUiContentPadding">
+                <Label text="{i18n>dlgConflictKindLbl}" required="true"/>
+                <Select selectedKey="{conflict>/kind}" width="100%" change=".onConflictKindChange">
+                    <core:Item key="sod"            text="SoD - fires when a user holds 2+ of the listed role collections"/>
+                    <core:Item key="critical"       text="Critical - fires when a user holds 1+ of the listed role collections"/>
+                    <core:Item key="threshold"      text="Threshold - fires when a user holds N+ role collections"/>
+                    <core:Item key="external_email" text="External email - fires when a user's email domain is not in the internal allow-list"/>
+                </Select>
+                <MessageStrip text="{conflict>/kindHint}" type="Information" showIcon="true"
+                              class="sapUiSmallMarginTop"/>
+
+                <Label text="{i18n>dlgConflictNameLbl}" required="true" class="sapUiSmallMarginTop"/>
+                <Input value="{conflict>/name}" placeholder="e.g. Admin vs Audit"/>
+
+                <Label text="{i18n>dlgConflictDescLbl}" class="sapUiSmallMarginTop"/>
+                <Input value="{conflict>/description}" placeholder="optional"/>
+
+                <l:HorizontalLayout class="sapUiSmallMarginTop" allowWrapping="true">
+                    <l:VerticalLayout>
+                        <Label text="{i18n>dlgConflictSeverityLbl}" required="true"/>
+                        <Select selectedKey="{conflict>/severity}" width="10rem">
+                            <core:Item key="low" text="low"/>
+                            <core:Item key="medium" text="medium"/>
+                            <core:Item key="high" text="high"/>
+                            <core:Item key="critical" text="critical"/>
+                        </Select>
+                    </l:VerticalLayout>
+                    <l:VerticalLayout class="sapUiSmallMarginBegin">
+                        <Label text="{i18n>dlgConflictScopeLbl}" required="true"/>
+                        <Select selectedKey="{conflict>/scopeLevel}" width="10rem">
+                            <core:Item key="subaccount" text="subaccount"/>
+                            <core:Item key="space" text="space"/>
+                            <core:Item key="org" text="org"/>
+                            <core:Item key="global" text="global"/>
+                        </Select>
+                    </l:VerticalLayout>
+                    <l:VerticalLayout class="sapUiSmallMarginBegin"
+                                      visible="{= ${conflict>/kind} === 'threshold' }">
+                        <Label text="{i18n>dlgConflictThresholdLbl}" required="true"/>
+                        <Input value="{conflict>/thresholdCount}" type="Number" width="8rem"/>
+                    </l:VerticalLayout>
+                </l:HorizontalLayout>
+
+                <Label text="{conflict>/rcsLabel}"
+                       required="{= ${conflict>/kind} !== 'threshold' &amp;&amp; ${conflict>/kind} !== 'external_email' }"
+                       class="sapUiSmallMarginTop"/>
+                <TextArea value="{conflict>/rcsText}" rows="6" width="100%"
+                          placeholder="{conflict>/rcsPlaceholder}"/>
+            </l:VerticalLayout>
+        </content>
+        <buttons>
+            <Button text="{i18n>dlgConflictSave}" type="Emphasized" press=".onSaveConflict"/>
+            <Button text="{i18n>dlgConflictCancel}" press=".onCancelConflict"/>
+        </buttons>
+    </Dialog>
+</core:FragmentDefinition>

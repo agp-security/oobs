@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: btpc-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: btpc
+      POSTGRES_USER: btpc
+      POSTGRES_PASSWORD: btpc
+    ports:
+      - "5432:5432"
+    volumes:
+      - btpc-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U btpc -d btpc"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  btpc-pgdata:

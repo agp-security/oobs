@@ -1,0 +1,49 @@
+<!--
+  SPDX-License-Identifier: AGPL-3.0-only
+  Copyright 2026 Jan-Luca Gruber
+-->
+<core:FragmentDefinition
+    xmlns="sap.m"
+    xmlns:l="sap.ui.layout"
+    xmlns:core="sap.ui.core">
+
+    <!-- User-scoped settings only: dev-auth (local profile testing) and a
+         read-only view of the server's state. Audit-log forwarding and the
+         external-email allowlist are operator/admin config - they live in
+         the Admin tab in the main shell, not here. -->
+    <Dialog title="{i18n>dlgSettingsTitle}" contentWidth="36rem">
+        <content>
+            <l:VerticalLayout width="100%" class="sapUiContentPadding">
+
+                <Title text="{i18n>settingsDevAuthSection}" level="H3"/>
+                <MessageStrip text="{i18n>settingsDevAuthDisabled}" type="Warning" showIcon="true"
+                              visible="{= !${shell>/devAuthEnabled}}" class="sapUiTinyMarginTop"/>
+                <Text text="{i18n>settingsDevAuthHint}" visible="{shell>/devAuthEnabled}"
+                      class="sapUiTinyMarginTop"/>
+
+                <Label text="{i18n>devAuthUser}" required="true" class="sapUiSmallMarginTop"
+                       visible="{shell>/devAuthEnabled}"/>
+                <Input value="{devAuth>/user}" enabled="{shell>/devAuthEnabled}"/>
+
+                <Label text="{i18n>devAuthScopes}" class="sapUiSmallMarginTop"
+                       visible="{shell>/devAuthEnabled}"/>
+                <Input value="{devAuth>/scopes}" enabled="{shell>/devAuthEnabled}"/>
+
+                <Title text="Server state" level="H3" class="sapUiSmallMarginTop"/>
+                <l:VerticalLayout width="100%">
+                    <Text text="Profiles: {shell>/profilesLabel}"/>
+                    <Text text="Dev-auth on server: {= ${shell>/devAuthEnabled} ? 'yes' : 'no' }"/>
+                    <Text text="Version: {shell>/version}"/>
+                </l:VerticalLayout>
+
+                <MessageStrip text="{i18n>settingsAdminMovedHint}" type="Information" showIcon="true"
+                              class="sapUiSmallMarginTop"/>
+            </l:VerticalLayout>
+        </content>
+        <buttons>
+            <Button text="{i18n>settingsApply}" type="Emphasized"
+                    press=".onSaveDevAuth" visible="{shell>/devAuthEnabled}"/>
+            <Button text="{i18n>settingsClose}" press=".onCloseSettings"/>
+        </buttons>
+    </Dialog>
+</core:FragmentDefinition>

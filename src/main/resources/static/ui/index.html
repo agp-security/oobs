@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>OOBS</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <link rel="shortcut icon" type="image/svg+xml" href="/favicon.svg">
+    <script
+        id="sap-ui-bootstrap"
+        src="https://sapui5.hana.ondemand.com/resources/sap-ui-core.js"
+        data-sap-ui-theme="sap_horizon"
+        data-sap-ui-libs="sap.m,sap.f,sap.tnt,sap.ui.core,sap.ui.layout,sap.suite.ui.commons,sap.suite.ui.microchart"
+        data-sap-ui-async="true"
+        data-sap-ui-resourceroots='{"btpc": "./"}'
+        data-sap-ui-oninit="module:sap/ui/core/ComponentSupport"
+        data-sap-ui-compat-version="edge"
+        data-sap-ui-frame-options="trusted"></script>
+    <style>
+        html, body { height: 100%; margin: 0; padding: 0; box-sizing: border-box; }
+        html, body, body.sapUiBody {
+            width: 100vw; max-width: 100vw; overflow-x: hidden;
+        }
+        body.sapUiBody { overflow-y: auto; }
+        #container { width: 100vw; max-width: 100vw; overflow-x: hidden; }
+
+        .btpcKpiTile { min-width: 11rem; }
+        /* TwoByOne tiles (sparkline tiles) need extra width so the
+           LineMicroChart has room. The default sap.m.GenericTile width is
+           too narrow for a 14-point trend line. */
+        .btpcKpiTileWide { min-width: 22rem; }
+
+        /* Logs > Action select. The grid cell (l:GridData span=L6) is the
+           outer container, but sap.m.Select's rendered <div> picks its own
+           intrinsic width based on the longest item (subject to
+           autoAdjustWidth). Force a min-width on the rendered element so
+           long values (xsuaa_restore_roles, cf_revoke_org_roles, etc.)
+           display in full instead of getting trimmed with an ellipsis. */
+        .btpcLogActionSelect { min-width: 20rem !important; width: 100% !important; }
+        /* Outcome select: shorter values (max 7 chars - "skipped"/"dry-run")
+           but the bare default still rendered as a sliver. 10rem fits any
+           value plus the chevron with room to breathe. */
+        .btpcLogOutcomeSelect { min-width: 10rem !important; width: 100% !important; }
+
+        /* Per-section spacing. The previous setup used sapUiResponsiveMargin
+           on each Panel - margins sit OUTSIDE the box, so a 100%-width panel
+           + 2rem margin on each side overflowed the parent (the user's
+           "going to the right" symptom). Padding sits INSIDE the box (with
+           box-sizing: border-box), so symmetric horizontal padding on the
+           section VBox gives equal space on both sides AND no overflow.
+           Panels inside get width: 100% via .btpcPanel. */
+        .btpcSection { box-sizing: border-box; padding: 0.5rem 1.5rem 1rem; width: 100%; }
+        .btpcPanel { width: 100% !important; max-width: 100% !important; }
+
+        /* Section spacing (every tab). Each btpcSection is a flex VBox;
+           give it a real gap so the panels (and MessageStrip siblings)
+           don't render flush against each other. The earlier
+           `.btpcSection > .btpcPanel + .btpcPanel + margin-top` only
+           covered Panel-after-Panel - broke when a MessageStrip sat
+           between Panels (admin, discovery). `gap` covers every direct
+           child without per-pair selectors. */
+        .btpcSection { gap: 1rem; }
+        /* Inside a Panel, its content children also need breathing room.
+           sap.m.Panel renders content as a flex column by default - we
+           just need the gap. Without this nested Panels (Health page's
+           per-subaccount + per-tenant, admin's audit-sink sub-panels)
+           touch. */
+        .btpcPanel > .sapMPanelContent { padding: 0.5rem 1rem; box-sizing: border-box; }
+        .btpcPanel > .sapMPanelContent > * + * { margin-top: 0.75rem; }
+        /* Nested expandable Panel content also needs the same treatment
+           so e.g. Health → Per-subaccount → Table doesn't pin to the
+           Panel header. */
+        .sapMPanelExpanded > .sapMPanelContent { padding: 0.5rem 0.75rem; box-sizing: border-box; }
+        .sapMPanelExpanded > .sapMPanelContent > * + * { margin-top: 0.5rem; }
+
+        /* sap.m.Table renders <table style="table-layout: auto"> inline,
+           which lets the table grow to the widest cell - even just the
+           column headers can push it past the parent. `fixed` constrains
+           the table to its container's width and distributes columns
+           proportionally; the inline style is what we beat with !important. */
+        .sapMListTbl, .sapMTbl {
+            width: 100% !important;
+            max-width: 100% !important;
+            table-layout: fixed !important;
+        }
+        .sapMTblCell, .sapMText, .sapMObjId { overflow-wrap: anywhere; word-break: break-word; }
+        /* Belt-and-braces: if a row genuinely needs more width than the
+           panel offers, scroll within the panel. */
+        .sapMPanelContent { overflow-x: auto; }
+    </style>
+</head>
+<body class="sapUiBody">
+    <div
+        data-sap-ui-component
+        data-name="btpc"
+        data-id="container"
+        data-async="true"
+        style="height: 100%"></div>
+</body>
+</html>

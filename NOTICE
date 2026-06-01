@@ -1,0 +1,89 @@
+btp-containment
+Copyright (C) 2026 Jan-Luca Gruber
+
+This product is developed by Jan-Luca Gruber (https://agp-security.com).
+
+This program is free software: you can redistribute it and/or modify it
+under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or (at your
+option) any later version is NOT granted - this project is licensed under
+AGPL-3.0-only (see the SPDX headers in each source file and the LICENSE
+file at the repository root).
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License
+for more details: https://www.gnu.org/licenses/agpl-3.0.html
+
+================================================================================
+THIRD-PARTY COMPONENTS
+================================================================================
+
+The distributable artifact (btp-containment.jar) bundles the following
+third-party components. Their licenses are compatible with AGPL-3.0-only;
+each component remains under its own license and the notices below are
+reproduced in satisfaction of those licenses' attribution requirements.
+
+--------------------------------------------------------------------------------
+Apache License, Version 2.0 (https://www.apache.org/licenses/LICENSE-2.0)
+
+The following components ship their own NOTICE file, reproduced verbatim as
+required by section 4(d) of the Apache License, Version 2.0:
+
+Spring Boot
+Copyright (c) 2012-2024 VMware, Inc.
+
+This product is licensed to you under the Apache License, Version 2.0
+(the "License"). You may not use this product except in compliance with
+the License.
+
+Spring Framework
+Copyright (c) 2002-2025 Pivotal, Inc.
+
+This product is licensed to you under the Apache License, Version 2.0
+(the "License"). You may not use this product except in compliance with
+the License.
+
+This product may include a number of subcomponents with separate
+copyright notices and license terms. Your use of the source code for
+these subcomponents is subject to the terms and conditions of the
+subcomponent's license, as noted in the license.txt file.
+
+The following components are licensed under the Apache License, Version 2.0
+and do not ship a separate NOTICE file; they are attributed here:
+
+  - Spring Security        Copyright (c) 2002-2025 the original authors (VMware, Inc.)
+  - Flyway (flyway-core,   Copyright (c) Red Gate Software Ltd.
+    flyway-database-postgresql)
+  - jOOQ (Open Source      Copyright (c) Data Geekery GmbH (https://www.jooq.org)
+    Edition, used here
+    against PostgreSQL)
+  - java-cfenv             Copyright (c) VMware, Inc. and its affiliates
+
+--------------------------------------------------------------------------------
+BSD 2-Clause License
+
+PostgreSQL JDBC Driver (org.postgresql:postgresql)
+Copyright (c) 1997, PostgreSQL Global Development Group
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice,
+   this list of conditions and the following disclaimer.
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.

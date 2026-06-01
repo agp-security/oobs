@@ -1,0 +1,42 @@
+{
+    "_version": "1.59.0",
+    "sap.app": {
+        "id": "btpc",
+        "type": "application",
+        "i18n": "i18n/i18n.properties",
+        "title": "{{appTitle}}",
+        "description": "{{appDescription}}",
+        "applicationVersion": { "version": "0.1.0" }
+    },
+    "sap.ui": {
+        "technology": "UI5",
+        "deviceTypes": { "desktop": true, "tablet": true, "phone": true }
+    },
+    "sap.ui5": {
+        "rootView": {
+            "viewName": "btpc.view.App",
+            "type": "XML",
+            "id": "app"
+        },
+        "dependencies": {
+            "minUI5Version": "1.108.0",
+            "libs": {
+                "sap.m": {},
+                "sap.f": {},
+                "sap.ui.core": {},
+                "sap.ui.layout": {}
+            }
+        },
+        "models": {
+            "i18n": {
+                "type": "sap.ui.model.resource.ResourceModel",
+                "settings": {
+                    "bundleName": "btpc.i18n.i18n",
+                    "supportedLocales": [""],
+                    "fallbackLocale": ""
+                }
+            }
+        },
+        "contentDensities": { "compact": true, "cozy": true }
+    }
+}

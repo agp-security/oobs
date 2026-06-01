@@ -1,0 +1,15 @@
+{
+  "name": "btp-containment-approuter",
+  "description": "App router for BTP Containment - fronts the Spring service, handles XSUAA login.",
+  "version": "0.1.0",
+  "license": "AGPL-3.0-only",
+  "author": "Jan-Luca Gruber <admin@gruber.ninja>",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node node_modules/@sap/approuter/approuter.js"
+  },
+  "dependencies": {
+    "@sap/approuter": "22.0.1"
+  },
+  "private": true
+}

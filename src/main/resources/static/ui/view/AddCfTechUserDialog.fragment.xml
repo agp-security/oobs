@@ -1,0 +1,72 @@
+<!--
+  SPDX-License-Identifier: AGPL-3.0-only
+  Copyright 2026 Jan-Luca Gruber
+-->
+<core:FragmentDefinition
+    xmlns="sap.m"
+    xmlns:l="sap.ui.layout"
+    xmlns:core="sap.ui.core"
+    xmlns:u="sap.ui.unified">
+
+    <Dialog title="{i18n>dlgAddCfTechUserTitle}" contentWidth="48rem" stretchOnPhone="true">
+        <content>
+            <l:VerticalLayout width="100%" class="sapUiContentPadding">
+                <MessageStrip text="{i18n>dlgAddCfTechUserHint}" type="Information" showIcon="true"/>
+
+                <Label text="{i18n>cfTechMode}" class="sapUiSmallMarginTop"/>
+                <SegmentedButton selectedKey="{cfTech>/mode}" width="100%">
+                    <items>
+                        <SegmentedButtonItem key="new"   text="{i18n>cfTechModeNew}"   icon="sap-icon://add"/>
+                        <SegmentedButtonItem key="reuse" text="{i18n>cfTechModeReuse}" icon="sap-icon://copy"
+                                             enabled="{= ${cfTech>/reuseSources}.length > 0 }"/>
+                    </items>
+                </SegmentedButton>
+
+                <l:VerticalLayout visible="{= ${cfTech>/mode} === 'reuse' }" width="100%">
+                    <MessageStrip text="{i18n>cfTechReuseHint}" type="Information"
+                                  showIcon="true" class="sapUiSmallMarginTop"/>
+                    <Label text="{i18n>cfTechReuseSource}" required="true" class="sapUiSmallMarginTop"/>
+                    <Select items="{cfTech>/reuseSources}"
+                            selectedKey="{cfTech>/reuseFromSubaccountId}"
+                            forceSelection="false" width="100%">
+                        <core:Item key="" text="{i18n>cfTechReuseNone}"/>
+                        <core:Item key="{cfTech>id}"
+                                   text="{cfTech>cisDisplayName} ({cfTech>region})"/>
+                    </Select>
+                </l:VerticalLayout>
+
+                <Label text="{i18n>cfTechCfApiUrl}" required="true" class="sapUiSmallMarginTop"/>
+                <Input value="{cfTech>/cfApiUrl}" placeholder="https://api.cf.us10.hana.ondemand.com"/>
+
+                <Label text="{i18n>cfTechCfUaaUrl}" required="true" class="sapUiSmallMarginTop"/>
+                <Input value="{cfTech>/cfUaaUrl}" placeholder="https://login.cf.us10.hana.ondemand.com"/>
+
+                <l:VerticalLayout visible="{= ${cfTech>/mode} === 'new' }" width="100%">
+                    <Label text="{i18n>cfTechUsername}" required="true" class="sapUiSmallMarginTop"/>
+                    <Input value="{cfTech>/username}" placeholder="btpc-bot@example.com"/>
+
+                    <Label text="{i18n>cfTechOrigin}" required="true" class="sapUiSmallMarginTop"/>
+                    <Input value="{cfTech>/origin}" placeholder="{i18n>cfTechOriginHint}"/>
+
+                    <Label text="{i18n>cfTechIasPasscodeUrl}" required="true" class="sapUiSmallMarginTop"/>
+                    <Input value="{cfTech>/iasPasscodeUrl}"
+                           placeholder="https://your-tenant.accounts.ondemand.com/service/users/passcode"/>
+
+                    <Label text="{i18n>cfTechP12File}" required="true" class="sapUiSmallMarginTop"/>
+                    <u:FileUploader fileType="p12,pfx" placeholder="cert.p12"
+                                    change=".onCfTechP12Selected"
+                                    width="100%"/>
+                    <Text text="{cfTech>/p12Status}" class="sapUiTinyMarginTop"/>
+
+                    <Label text="{i18n>cfTechP12Password}" required="true" class="sapUiSmallMarginTop"/>
+                    <Input value="{cfTech>/p12Password}" type="Password"
+                           placeholder="{i18n>cfTechP12PasswordHint}"/>
+                </l:VerticalLayout>
+            </l:VerticalLayout>
+        </content>
+        <buttons>
+            <Button text="{i18n>btnAddCfTechUserSave}" type="Emphasized" press=".onConfirmAddCfTechUser"/>
+            <Button text="{i18n>btnAddCfTechUserCancel}" press=".onCancelAddCfTechUser"/>
+        </buttons>
+    </Dialog>
+</core:FragmentDefinition>

@@ -1,0 +1,44 @@
+<!--
+  SPDX-License-Identifier: AGPL-3.0-only
+  Copyright 2026 Jan-Luca Gruber
+-->
+<core:FragmentDefinition
+    xmlns="sap.m"
+    xmlns:l="sap.ui.layout"
+    xmlns:core="sap.ui.core"
+    xmlns:u="sap.ui.unified">
+
+    <!-- IAS tenant create/edit. Auth shape now mirrors the CF technical
+         user: upload a P12 + password instead of pasting PEM blocks. -->
+    <Dialog title="{ias>/dialogTitle}" contentWidth="44rem" stretchOnPhone="true">
+        <content>
+            <l:VerticalLayout width="100%" class="sapUiContentPadding">
+                <MessageStrip text="{i18n>dlgIasTenantHint}" type="Information" showIcon="true"/>
+
+                <Label text="{i18n>iasTenantDisplayName}" required="true" class="sapUiSmallMarginTop"/>
+                <Input value="{ias>/displayName}" placeholder="{i18n>iasTenantDisplayNamePh}"/>
+
+                <Label text="{i18n>iasUrl}" required="true" class="sapUiSmallMarginTop"/>
+                <Input value="{ias>/url}"
+                       placeholder="https://your-tenant.accounts.ondemand.com"
+                       enabled="{= !${ias>/editMode}}"/>
+                <Text text="{i18n>iasTenantUrlHintEdit}" visible="{ias>/editMode}"
+                      class="sapUiTinyMarginTop"/>
+
+                <Label text="{i18n>iasP12File}" required="true" class="sapUiSmallMarginTop"/>
+                <u:FileUploader fileType="p12,pfx" placeholder="ias-cert.p12"
+                                change=".onIasP12Selected"
+                                width="100%"/>
+                <Text text="{ias>/p12Status}" class="sapUiTinyMarginTop"/>
+
+                <Label text="{i18n>iasP12Password}" class="sapUiSmallMarginTop"/>
+                <Input value="{ias>/p12Password}" type="Password"
+                       placeholder="{= ${ias>/editMode} ? ${i18n>iasTenantP12PwEditPh} : ${i18n>iasP12PasswordHint} }"/>
+            </l:VerticalLayout>
+        </content>
+        <buttons>
+            <Button text="{i18n>btnAddIasSave}" type="Emphasized" press=".onConfirmAddIas"/>
+            <Button text="{i18n>btnAddIasCancel}" press=".onCancelAddIas"/>
+        </buttons>
+    </Dialog>
+</core:FragmentDefinition>

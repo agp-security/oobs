@@ -1,0 +1,107 @@
+{
+  "_meta": {
+    "description": "Built-in catalog of BTP risk rules. Loaded by ConflictSetSeeder on startup when conflict_sets is empty. Admins can edit / disable / delete after loading; the seeder will not overwrite once any rule exists. Update this file + bump the version + clear the table to re-seed on dev environments.",
+    "version": 1
+  },
+  "rules": [
+    {
+      "name": "Global Account Administrator",
+      "description": "Holds full control over the global account - can create / destroy subaccounts, assign any role collection.",
+      "severity": "critical",
+      "kind": "critical",
+      "scopeLevel": "global",
+      "roleCollections": ["Global Account Administrator"]
+    },
+    {
+      "name": "Subaccount Administrator",
+      "description": "Full control over a subaccount - role collections, destinations, services. One holder is one too many; this is a break-glass-only role.",
+      "severity": "critical",
+      "kind": "critical",
+      "scopeLevel": "subaccount",
+      "roleCollections": ["Subaccount Administrator"]
+    },
+    {
+      "name": "User and Role Administrator",
+      "description": "Can grant any role collection to any user. Indirect path to every other privilege in the subaccount.",
+      "severity": "critical",
+      "kind": "critical",
+      "scopeLevel": "subaccount",
+      "roleCollections": ["User and Role Administrator"]
+    },
+    {
+      "name": "Destination Administrator",
+      "description": "Can edit destinations including their stored credentials - directly exfil-able by anyone holding this role.",
+      "severity": "high",
+      "kind": "critical",
+      "scopeLevel": "subaccount",
+      "roleCollections": ["Destination Administrator"]
+    },
+    {
+      "name": "Cloud Connector Administrator",
+      "description": "Can configure on-prem connectivity - backdoor into the customer's corporate network.",
+      "severity": "high",
+      "kind": "critical",
+      "scopeLevel": "subaccount",
+      "roleCollections": ["Cloud Connector Administrator"]
+    },
+    {
+      "name": "Audit Log Administrator",
+      "description": "Can modify audit-log configuration. Combined with Viewer permits self-erasure of incident evidence.",
+      "severity": "high",
+      "kind": "critical",
+      "scopeLevel": "subaccount",
+      "roleCollections": ["Audit Log Administrator"]
+    },
+    {
+      "name": "Connectivity and Destination Administrator",
+      "description": "Full destination + connectivity admin in one role - same exfil concern as Destination Admin, plus on-prem reach.",
+      "severity": "high",
+      "kind": "critical",
+      "scopeLevel": "subaccount",
+      "roleCollections": ["Connectivity and Destination Administrator"]
+    },
+
+    {
+      "name": "Audit log conflict (Admin + Viewer)",
+      "description": "Holding both Audit Log Administrator and Audit Log Viewer lets one user inspect AND tamper with the audit trail - bypasses the four-eyes principle on evidence preservation.",
+      "severity": "high",
+      "kind": "sod",
+      "scopeLevel": "subaccount",
+      "roleCollections": ["Audit Log Administrator", "Audit Log Viewer"]
+    },
+    {
+      "name": "Privilege escalation pair (Subaccount Admin + User Admin)",
+      "description": "Either alone is critical; both together creates a closed loop where the user can grant themselves any future privilege without external review.",
+      "severity": "critical",
+      "kind": "sod",
+      "scopeLevel": "subaccount",
+      "roleCollections": ["Subaccount Administrator", "User and Role Administrator"]
+    },
+    {
+      "name": "Destination + Connectivity admin pair",
+      "description": "Holding both Destination Administrator and Cloud Connector Administrator allows a single user to exfiltrate corporate-network credentials AND route external traffic into the corporate network.",
+      "severity": "high",
+      "kind": "sod",
+      "scopeLevel": "subaccount",
+      "roleCollections": ["Destination Administrator", "Cloud Connector Administrator"]
+    },
+
+    {
+      "name": "Over-privileged user (10+ role collections)",
+      "description": "User holds 10 or more role collections in the subaccount. Empirically the inflection point above which separation of duties almost certainly fails; merits a review even if no specific conflict triggers.",
+      "severity": "medium",
+      "kind": "threshold",
+      "scopeLevel": "subaccount",
+      "roleCollections": [],
+      "thresholdCount": 10
+    },
+    {
+      "name": "External email account",
+      "description": "User's email domain is not on the internal allow-list - usually an external partner or a stale guest invitation. Set the internal domains globally via the btpc.external-email.internal-domains property, or per-rule by editing this row and listing domains in the 'role collections' field (one per line).",
+      "severity": "medium",
+      "kind": "external_email",
+      "scopeLevel": "subaccount",
+      "roleCollections": []
+    }
+  ]
+}

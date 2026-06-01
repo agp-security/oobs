@@ -1,0 +1,88 @@
+{
+  "xsappname": "btp-containment",
+  "tenant-mode": "dedicated",
+  "description": "BTP Containment - open-source IAM containment tooling",
+  "scopes": [
+    {
+      "name": "$XSAPPNAME.btpc.admin",
+      "description": "Enroll subaccounts, upload service-key credentials, manage IAS tenants, conflict-set definitions, protected users, audit sink config, origin profiles."
+    },
+    {
+      "name": "$XSAPPNAME.btpc.responder",
+      "description": "Incident-response: lock + unlock users only. Cannot upload credentials, manage config, or run SoD scans."
+    },
+    {
+      "name": "$XSAPPNAME.btpc.sod_viewer",
+      "description": "Read SoD conflict-set definitions and findings; can trigger SoD scans. No mutation rights on identities."
+    },
+    {
+      "name": "$XSAPPNAME.btpc.viewer",
+      "description": "Read-only access to subaccounts, audit log, scan results."
+    }
+  ],
+  "role-templates": [
+    {
+      "name": "BtpContainmentAdmin",
+      "description": "Full admin: every scope the app exposes. Use for the platform owner / on-call lead.",
+      "scope-references": [
+        "$XSAPPNAME.btpc.admin",
+        "$XSAPPNAME.btpc.responder",
+        "$XSAPPNAME.btpc.sod_viewer",
+        "$XSAPPNAME.btpc.viewer"
+      ]
+    },
+    {
+      "name": "BtpContainmentResponder",
+      "description": "Incident responder: contain + unlock users only. Cannot upload credentials, cannot change config, cannot run SoD scans.",
+      "scope-references": [
+        "$XSAPPNAME.btpc.responder",
+        "$XSAPPNAME.btpc.viewer"
+      ]
+    },
+    {
+      "name": "BtpContainmentSodViewer",
+      "description": "SoC / GRC analyst: review SoD conflict sets and findings, trigger scans. Cannot mutate identities.",
+      "scope-references": [
+        "$XSAPPNAME.btpc.sod_viewer",
+        "$XSAPPNAME.btpc.viewer"
+      ]
+    },
+    {
+      "name": "BtpContainmentViewer",
+      "description": "Read-only: subaccount inventory, audit log timeline, scan results. No actions.",
+      "scope-references": [
+        "$XSAPPNAME.btpc.viewer"
+      ]
+    }
+  ],
+  "role-collections": [
+    {
+      "name": "BTP Containment Administrator",
+      "description": "Grants the admin role template.",
+      "role-template-references": ["$XSAPPNAME.BtpContainmentAdmin"]
+    },
+    {
+      "name": "BTP Containment Incident Responder",
+      "description": "Grants the responder role template (lock / unlock only).",
+      "role-template-references": ["$XSAPPNAME.BtpContainmentResponder"]
+    },
+    {
+      "name": "BTP Containment SoD Viewer",
+      "description": "Grants the sod_viewer role template (read findings, run scans).",
+      "role-template-references": ["$XSAPPNAME.BtpContainmentSodViewer"]
+    },
+    {
+      "name": "BTP Containment Viewer",
+      "description": "Grants the viewer role template (read-only).",
+      "role-template-references": ["$XSAPPNAME.BtpContainmentViewer"]
+    }
+  ],
+  "oauth2-configuration": {
+    "redirect-uris": [
+      "https://*.cfapps.eu10.hana.ondemand.com/**",
+      "https://*.cfapps.us10.hana.ondemand.com/**",
+      "https://*.cfapps.eu20.hana.ondemand.com/**",
+	  "https://*.cfapps.us10-001.hana.ondemand.com/**"
+    ]
+  }
+}

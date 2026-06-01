@@ -1,0 +1,2218 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright 2026 Jan-Luca Gruber
+
+openapi: 3.0.3
+
+info:
+  title: BTP User Containment API
+  version: 0.1.0-SNAPSHOT
+  description: |
+    REST API for the OOBS: a central operator console
+    that enrolls SAP BTP subaccounts / IAS tenants, discovers identity providers
+    and SoD conflicts, and contains (locks) or unlocks compromised users across subaccounts,
+    Cloud Foundry (XSUAA) and IAS in response to an incident.
+
+    ## Authentication
+    All `/api/v1/**` endpoints (except `/health` and `/whoami`) require a valid
+    XSUAA-issued OAuth2 **bearer JWT**. Authorization is enforced per-operation
+    via OAuth2 scopes; the required scope is noted in each operation description.
+
+    ## CSRF
+    Keep in mind that the SAP app router uses CSRF. 
+    For that see: x-csrf-token docu on the sap help site 
+    (it changes all x days so you need to search it)
+
+    ## Scope model
+    Four scopes exist, in increasing privilege. The `@PreAuthorize` rules map to:
+    - **`btpc.viewer`** - read-only. Satisfied by any of the four scopes.
+    - **`btpc.sod_viewer`** - may run SoD scans (admin also allowed).
+    - **`btpc.responder`** - may contain/unlock users (admin also allowed).
+    - **`btpc.admin`** - full control: enrollment, credentials, config, deletes.
+
+    "Required scope" below names the *minimum* intent; `btpc.admin` always
+    satisfies it.
+
+    ## Caller source
+    Mutating endpoints accept an optional `X-Caller-Source` header used only for
+    audit attribution (`soar` / `soar-api`, `system`, or default `UI`). It does
+    not change behaviour or authorization.
+  license:
+    name: AGPL-3.0-only
+    url: https://www.gnu.org/licenses/agpl-3.0.html
+  contact:
+    name: Jan-Luca Gruber
+    url: https://agp-security.com
+
+servers:
+  - url: /
+    description: Same-origin (served behind the approuter)
+
+tags:
+  - name: Platform
+    description: Liveness and identity introspection
+  - name: App config
+    description: Global-account-wide configuration toggles
+  - name: Subaccounts
+    description: Enrolled subaccount lifecycle and credentials
+  - name: Contacts
+    description: Per-subaccount notification contacts
+  - name: IAS tenants
+    description: Enrolled IAS tenant lifecycle and credentials
+  - name: Origin profiles
+    description: Named groupings of XSUAA origin keys
+  - name: Identity providers
+    description: Live discovery of XSUAA identity providers
+  - name: Discovery
+    description: CIS central-viewer keys and discovered subaccount candidates
+  - name: CIS
+    description: Ad-hoc Cloud Management Service discovery
+  - name: Containment
+    description: Lock / unlock users across XSUAA + IAS
+  - name: Protected users
+    description: Break-glass allowlist that blocks containment
+  - name: SoD
+    description: Segregation-of-duties conflict sets and scans
+  - name: User analysis
+    description: Cross-system footprint of a single user
+  - name: Audit logs
+    description: Query and export the audit-event trail
+  - name: Health check
+    description: Credential health-probe matrix
+  - name: Certificates
+    description: Stored credential certificate inventory
+  - name: Audit sinks
+    description: Outbound audit forwarders (Splunk HEC, webhook, ...)
+
+security:
+  - xsuaa: []
+
+paths:
+  # ----------------------------------------------------------------- Platform
+  /api/v1/health:
+    get:
+      tags: [Platform]
+      summary: Liveness + DB connectivity probe
+      description: |
+        Public. Returns service status, version, active Spring profiles and
+        whether the dev-auth shortcut is enabled. Also executes `SELECT 1`
+        against Postgres; a DB failure surfaces as `500`.
+      security: []
+      responses:
+        '200':
+          description: Service healthy
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Health' }
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/v1/whoami:
+    get:
+      tags: [Platform]
+      summary: Current principal and granted scopes
+      description: |
+        Public/auth-aware. With no/invalid token returns
+        `{ "authenticated": false }`; otherwise returns the user name and the
+        granted scopes (with the `SCOPE_` prefix stripped).
+      security: []
+      responses:
+        '200':
+          description: Identity introspection
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WhoAmI' }
+
+  # --------------------------------------------------------------- App config
+  /api/v1/app-config:
+    get:
+      tags: [App config]
+      summary: List global-account config values
+      description: 'Required scope: `btpc.viewer`.'
+      responses:
+        '200':
+          description: Map of config key to its current state
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: { $ref: '#/components/schemas/KeyState' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/app-config/{key}:
+    put:
+      tags: [App config]
+      summary: Update a whitelisted config key
+      description: |
+        Required scope: `btpc.admin`. Only known keys are accepted
+        (external-email internal domains, health auto-probe interval); an
+        unknown key yields `400`.
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AppConfigUpdate' }
+      responses:
+        '200':
+          description: Updated key state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/KeyState' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # -------------------------------------------------------------- Subaccounts
+  /api/v1/subaccounts:
+    get:
+      tags: [Subaccounts]
+      summary: List enrolled subaccounts
+      description: 'Required scope: `btpc.viewer`.'
+      responses:
+        '200':
+          description: Enrolled subaccounts
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/SubaccountDto' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Subaccounts]
+      summary: Enroll a subaccount from a service key
+      description: 'Required scope: `btpc.admin`.'
+      parameters:
+        - $ref: '#/components/parameters/CallerSource'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EnrollRequest' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SubaccountDto' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/subaccounts/quick-add:
+    post:
+      tags: [Subaccounts]
+      summary: Manually add a subaccount (no central-viewer required)
+      description: 'Required scope: `btpc.admin`.'
+      parameters:
+        - $ref: '#/components/parameters/CallerSource'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/QuickAddRequest' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SubaccountDto' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/subaccounts/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [Subaccounts]
+      summary: Get one subaccount
+      description: 'Required scope: `btpc.viewer`.'
+      responses:
+        '200':
+          description: Subaccount
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SubaccountDto' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Subaccounts]
+      summary: Unenroll a subaccount
+      description: 'Required scope: `btpc.admin`.'
+      parameters:
+        - $ref: '#/components/parameters/CallerSource'
+      responses:
+        '204': { description: Unenrolled }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/subaccounts/{id}/label:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    patch:
+      tags: [Subaccounts]
+      summary: Update the display label
+      description: 'Required scope: `btpc.admin`.'
+      parameters:
+        - $ref: '#/components/parameters/CallerSource'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LabelPatch' }
+      responses:
+        '200':
+          description: Updated subaccount
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SubaccountDto' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/subaccounts/{id}/metadata:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    patch:
+      tags: [Subaccounts]
+      summary: Update subaccount metadata
+      description: 'Required scope: `btpc.admin`.'
+      parameters:
+        - $ref: '#/components/parameters/CallerSource'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MetadataPatch' }
+      responses:
+        '200':
+          description: Updated subaccount
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SubaccountDto' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/subaccounts/{id}/credentials:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    post:
+      tags: [Subaccounts]
+      summary: Attach a service key credential
+      description: 'Required scope: `btpc.admin`. `serviceKey` is required.'
+      parameters:
+        - $ref: '#/components/parameters/CallerSource'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AttachCredential' }
+      responses:
+        '200':
+          description: Updated subaccount
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SubaccountDto' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/subaccounts/{id}/cf-org-id:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    patch:
+      tags: [Subaccounts]
+      summary: Set the Cloud Foundry org id
+      description: |
+        Required scope: `btpc.admin`. Partial update of a single subaccount
+        attribute (consistent with the `label` and `metadata` patches). Send
+        `{ "cfOrgId": null }` to clear the pin.
+      parameters:
+        - $ref: '#/components/parameters/CallerSource'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SetCfOrgId' }
+      responses:
+        '200':
+          description: Updated subaccount
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SubaccountDto' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/subaccounts/{id}/cf-technical-user:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    post:
+      tags: [Subaccounts]
+      summary: Attach a CF technical user
+      description: 'Required scope: `btpc.admin`.'
+      parameters:
+        - $ref: '#/components/parameters/CallerSource'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CfTechnicalUserPayload' }
+      responses:
+        '200':
+          description: Updated subaccount
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SubaccountDto' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/subaccounts/{id}/cf-technical-user/copy-from/{sourceId}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+      - name: sourceId
+        in: path
+        required: true
+        description: Subaccount to copy the technical-user credential from
+        schema: { type: string, format: uuid }
+    post:
+      tags: [Subaccounts]
+      summary: Copy a CF technical user from another subaccount
+      description: 'Required scope: `btpc.admin`.'
+      parameters:
+        - $ref: '#/components/parameters/CallerSource'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CopyCfTechUser' }
+      responses:
+        '200':
+          description: Updated subaccount
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SubaccountDto' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/subaccounts/{id}/provision-xsuaa-apiaccess:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    post:
+      tags: [Subaccounts]
+      summary: Provision an XSUAA apiaccess plan instance
+      description: 'Required scope: `btpc.admin`.'
+      parameters:
+        - $ref: '#/components/parameters/CallerSource'
+      responses:
+        '200':
+          description: Updated subaccount
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SubaccountDto' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ------------------------------------------------------------------ Contacts
+  /api/v1/subaccounts/{subaccountId}/contacts:
+    parameters:
+      - name: subaccountId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [Contacts]
+      summary: List contacts for a subaccount
+      description: 'Required scope: `btpc.viewer`.'
+      responses:
+        '200':
+          description: Contacts
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/SubaccountContact' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Contacts]
+      summary: Add a contact
+      description: 'Required scope: `btpc.admin`.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ContactPayload' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SubaccountContact' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/subaccounts/{subaccountId}/contacts/{id}:
+    parameters:
+      - name: subaccountId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - $ref: '#/components/parameters/IdPath'
+    put:
+      tags: [Contacts]
+      summary: Update a contact
+      description: 'Required scope: `btpc.admin`.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ContactPayload' }
+      responses:
+        '200':
+          description: Updated contact
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SubaccountContact' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Contacts]
+      summary: Delete a contact
+      description: 'Required scope: `btpc.admin`.'
+      responses:
+        '204': { description: Deleted }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # --------------------------------------------------------------- IAS tenants
+  /api/v1/ias-tenants:
+    get:
+      tags: [IAS tenants]
+      summary: List enrolled IAS tenants
+      description: 'Required scope: `btpc.viewer`.'
+      responses:
+        '200':
+          description: IAS tenants
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/IasTenantDto' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [IAS tenants]
+      summary: Enroll an IAS tenant
+      description: 'Required scope: `btpc.admin`.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IasTenantCreatePayload' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IasTenantDto' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/ias-tenants/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [IAS tenants]
+      summary: Get one IAS tenant
+      description: 'Required scope: `btpc.viewer`.'
+      responses:
+        '200':
+          description: IAS tenant
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IasTenantDto' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [IAS tenants]
+      summary: Delete an IAS tenant
+      description: 'Required scope: `btpc.admin`.'
+      responses:
+        '204': { description: Deleted }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/ias-tenants/{id}/meta:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    patch:
+      tags: [IAS tenants]
+      summary: Update IAS tenant display name
+      description: 'Required scope: `btpc.admin`.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IasTenantMeta' }
+      responses:
+        '200':
+          description: Updated tenant
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IasTenantDto' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/ias-tenants/{id}/credentials:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    put:
+      tags: [IAS tenants]
+      summary: Replace IAS tenant credentials
+      description: 'Required scope: `btpc.admin`.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IasTenantCreatePayload' }
+      responses:
+        '200':
+          description: Updated tenant
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IasTenantDto' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ------------------------------------------------------------ Origin profiles
+  /api/v1/origin-profiles:
+    get:
+      tags: [Origin profiles]
+      summary: List origin profiles
+      description: 'Required scope: `btpc.viewer`.'
+      responses:
+        '200':
+          description: Origin profiles
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/OriginProfile' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Origin profiles]
+      summary: Create an origin profile
+      description: |
+        Required scope: `btpc.admin`. `name` and a non-empty `originKeys`
+        list are required; unknown origin keys are rejected unless discovery
+        across the listed subaccounts was inconclusive.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OriginProfileBody' }
+      responses:
+        '200':
+          description: Created profile
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OriginProfile' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/origin-profiles/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    put:
+      tags: [Origin profiles]
+      summary: Update an origin profile
+      description: 'Required scope: `btpc.admin`.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OriginProfileBody' }
+      responses:
+        '200':
+          description: Updated profile
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OriginProfile' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Origin profiles]
+      summary: Delete an origin profile
+      description: 'Required scope: `btpc.admin`.'
+      responses:
+        '200': { description: Deleted }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ------------------------------------------------------- Identity providers
+  /api/v1/xsuaa/identity-providers:
+    get:
+      tags: [Identity providers]
+      summary: Discover XSUAA identity providers
+      description: |
+        Required scope: `btpc.viewer`. Live-queries enrolled subaccounts for
+        their configured identity providers (used to build origin profiles).
+      parameters:
+        - name: subaccountIds
+          in: query
+          required: false
+          description: Restrict discovery to these subaccount ids (repeatable)
+          schema:
+            type: array
+            items: { type: string, format: uuid }
+          style: form
+          explode: true
+      responses:
+        '200':
+          description: Discovery result
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IdpDiscoverResult' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ----------------------------------------------------------------- Discovery
+  /api/v1/discovery/keys:
+    get:
+      tags: [Discovery]
+      summary: List central-viewer keys
+      description: 'Required scope: `btpc.viewer`.'
+      responses:
+        '200':
+          description: Central-viewer keys
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/CentralViewerKey' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Discovery]
+      summary: Save a central-viewer key
+      description: 'Required scope: `btpc.admin`.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CentralKeySaveRequest' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CentralViewerKey' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/discovery/keys/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [Discovery]
+      summary: Get one central-viewer key
+      description: 'Required scope: `btpc.viewer`.'
+      responses:
+        '200':
+          description: Central-viewer key
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CentralViewerKey' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Discovery]
+      summary: Update central-viewer key settings
+      description: 'Required scope: `btpc.admin`.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CentralKeyUpdateRequest' }
+      responses:
+        '200':
+          description: Updated key
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CentralViewerKey' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Discovery]
+      summary: Delete a central-viewer key
+      description: 'Required scope: `btpc.admin`.'
+      responses:
+        '204': { description: Deleted }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/discovery/keys/{id}/sync:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    post:
+      tags: [Discovery]
+      summary: Trigger a discovery sync for one key
+      description: 'Required scope: `btpc.admin`.'
+      parameters:
+        - $ref: '#/components/parameters/CallerSource'
+      responses:
+        '200':
+          description: Sync result
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SyncResult' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '502': { $ref: '#/components/responses/BadGateway' }
+  /api/v1/discovery/candidates:
+    get:
+      tags: [Discovery]
+      summary: List discovered subaccount candidates
+      description: 'Required scope: `btpc.viewer`.'
+      parameters:
+        - name: onlyPromotable
+          in: query
+          required: false
+          schema: { type: boolean, default: false }
+        - name: centralKeyId
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Candidates
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/DiscoveredSubaccount' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/discovery/candidates/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [Discovery]
+      summary: Get one discovery candidate
+      description: 'Required scope: `btpc.viewer`.'
+      responses:
+        '200':
+          description: Candidate
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DiscoveredSubaccount' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Discovery]
+      summary: Delete a discovery candidate
+      description: 'Required scope: `btpc.admin`.'
+      responses:
+        '204': { description: Deleted }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ---------------------------------------------------------------------- CIS
+  /api/v1/cis/discover:
+    post:
+      tags: [CIS]
+      summary: Ad-hoc CIS subaccount discovery
+      description: |
+        Required scope: `btpc.admin`. Classifies the supplied service key and
+        requires it to be a CIS central-viewer key, then lists subaccounts.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CisDiscoverRequest' }
+      responses:
+        '200':
+          description: Discovered subaccounts
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CisDiscoverResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '502': { $ref: '#/components/responses/BadGateway' }
+
+  # --------------------------------------------------------------- Containment
+  /api/v1/containment:
+    post:
+      tags: [Containment]
+      summary: Contain (lock) a user
+      description: |
+        Required scope: `btpc.responder`. Locks a user across the selected
+        subaccounts / IAS tenants per the action flags in the request.
+      parameters:
+        - $ref: '#/components/parameters/CallerSource'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ContainRequest' }
+      responses:
+        '200':
+          description: Containment result
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ContainmentResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '502': { $ref: '#/components/responses/BadGateway' }
+  /api/v1/containment/unlock-preview:
+    get:
+      tags: [Containment]
+      summary: Preview what an unlock would restore
+      description: 'Required scope: `btpc.viewer`.'
+      parameters:
+        - name: userEmail
+          in: query
+          required: true
+          schema: { type: string }
+        - name: subaccountIds
+          in: query
+          required: false
+          schema:
+            type: array
+            items: { type: string, format: uuid }
+          style: form
+          explode: true
+      responses:
+        '200':
+          description: Preview entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/UnlockPreviewEntry' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/containment/unlock:
+    post:
+      tags: [Containment]
+      summary: Unlock a previously contained user
+      description: 'Required scope: `btpc.responder`.'
+      parameters:
+        - $ref: '#/components/parameters/CallerSource'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UnlockRequest' }
+      responses:
+        '200':
+          description: Unlock result
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UnlockResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '502': { $ref: '#/components/responses/BadGateway' }
+
+  # ----------------------------------------------------------- Protected users
+  /api/v1/protected-users:
+    get:
+      tags: [Protected users]
+      summary: List protected users
+      description: 'Required scope: `btpc.viewer`.'
+      responses:
+        '200':
+          description: Protected users
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ProtectedUserDto' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Protected users]
+      summary: Add a protected user
+      description: 'Required scope: `btpc.admin`.'
+      parameters:
+        - $ref: '#/components/parameters/CallerSource'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AddProtectedUser' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProtectedUserDto' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/protected-users/check:
+    get:
+      tags: [Protected users]
+      summary: Check whether an email is protected
+      description: 'Required scope: `btpc.responder`.'
+      parameters:
+        - name: email
+          in: query
+          required: true
+          schema: { type: string }
+        - name: subaccountId
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Protection check
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProtectedUserCheck' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/protected-users/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [Protected users]
+      summary: Get one protected user
+      description: 'Required scope: `btpc.viewer`.'
+      responses:
+        '200':
+          description: Protected user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProtectedUserDto' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Protected users]
+      summary: Remove a protected user
+      description: 'Required scope: `btpc.admin`.'
+      parameters:
+        - $ref: '#/components/parameters/CallerSource'
+      responses:
+        '204': { description: Removed }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ----------------------------------------------------------------------- SoD
+  /api/v1/sod/conflict-sets:
+    get:
+      tags: [SoD]
+      summary: List conflict sets
+      description: 'Required scope: `btpc.viewer`.'
+      responses:
+        '200':
+          description: Conflict sets
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ConflictSet' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [SoD]
+      summary: Create a conflict set
+      description: 'Required scope: `btpc.admin`.'
+      parameters:
+        - $ref: '#/components/parameters/CallerSource'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConflictSetPayload' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConflictSet' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/sod/conflict-sets/{id}:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    get:
+      tags: [SoD]
+      summary: Get one conflict set
+      description: 'Required scope: `btpc.viewer`.'
+      responses:
+        '200':
+          description: Conflict set
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConflictSet' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [SoD]
+      summary: Update a conflict set
+      description: 'Required scope: `btpc.admin`.'
+      parameters:
+        - $ref: '#/components/parameters/CallerSource'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ConflictSetPayload' }
+      responses:
+        '200':
+          description: Updated conflict set
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConflictSet' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [SoD]
+      summary: Delete a conflict set
+      description: 'Required scope: `btpc.admin`.'
+      parameters:
+        - $ref: '#/components/parameters/CallerSource'
+      responses:
+        '204': { description: Deleted }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/sod/conflict-sets/{id}/enabled:
+    parameters:
+      - $ref: '#/components/parameters/IdPath'
+    patch:
+      tags: [SoD]
+      summary: Enable or disable a conflict set
+      description: 'Required scope: `btpc.admin`.'
+      parameters:
+        - $ref: '#/components/parameters/CallerSource'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EnabledPatch' }
+      responses:
+        '200':
+          description: Updated conflict set
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConflictSet' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/sod/scan:
+    post:
+      tags: [SoD]
+      summary: Run an SoD scan against one subaccount
+      description: 'Required scope: `btpc.sod_viewer`. `subaccountId` is required.'
+      parameters:
+        - $ref: '#/components/parameters/CallerSource'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ScanRequest' }
+      responses:
+        '200':
+          description: Scan result
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ScanResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '502': { $ref: '#/components/responses/BadGateway' }
+
+  # -------------------------------------------------------------- User analysis
+  /api/v1/user-analysis:
+    get:
+      tags: [User analysis]
+      summary: Analyze a single user's cross-system footprint
+      description: 'Required scope: `btpc.responder`.'
+      parameters:
+        - name: email
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Analysis report
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AnalysisReport' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '502': { $ref: '#/components/responses/BadGateway' }
+
+  # ----------------------------------------------------------------- Audit logs
+  /api/v1/logs:
+    get:
+      tags: [Audit logs]
+      summary: Query audit events
+      description: 'Required scope: `btpc.viewer`. `limit` is clamped to 1..1000.'
+      parameters:
+        - { name: action, in: query, required: false, schema: { type: string } }
+        - { name: outcome, in: query, required: false, schema: { type: string } }
+        - { name: actor, in: query, required: false, schema: { type: string } }
+        - { name: targetEmail, in: query, required: false, schema: { type: string } }
+        - { name: fromDate, in: query, required: false, schema: { type: string }, description: ISO-8601 date/time lower bound }
+        - { name: toDate, in: query, required: false, schema: { type: string }, description: ISO-8601 date/time upper bound }
+        - { name: subaccountId, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: systemType, in: query, required: false, schema: { type: string } }
+        - { name: iasTenantId, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, required: false, schema: { type: integer, default: 100, minimum: 1, maximum: 1000 } }
+      responses:
+        '200':
+          description: Matching audit events
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: object, additionalProperties: true }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/logs/export:
+    get:
+      tags: [Audit logs]
+      summary: Export audit events as CSV or JSON
+      description: |
+        Required scope: `btpc.viewer`. Streams an attachment. `format` is
+        `csv` (default) or `json`; `limit` is clamped to 1..100000.
+      parameters:
+        - { name: format, in: query, required: false, schema: { type: string, enum: [csv, json], default: csv } }
+        - { name: action, in: query, required: false, schema: { type: string } }
+        - { name: outcome, in: query, required: false, schema: { type: string } }
+        - { name: actor, in: query, required: false, schema: { type: string } }
+        - { name: targetEmail, in: query, required: false, schema: { type: string } }
+        - { name: fromDate, in: query, required: false, schema: { type: string } }
+        - { name: toDate, in: query, required: false, schema: { type: string } }
+        - { name: subaccountId, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: systemType, in: query, required: false, schema: { type: string } }
+        - { name: iasTenantId, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, required: false, schema: { type: integer, default: 10000, minimum: 1, maximum: 100000 } }
+      responses:
+        '200':
+          description: Streamed export (Content-Disposition attachment)
+          content:
+            text/csv:
+              schema: { type: string, format: binary }
+            application/json:
+              schema: { type: array, items: { type: object, additionalProperties: true } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ---------------------------------------------------------------- Health check
+  /api/v1/health-check/run:
+    post:
+      tags: [Health check]
+      summary: Run the credential health-probe matrix
+      description: 'Required scope: `btpc.admin`. Probes every stored credential and caches the report.'
+      responses:
+        '200':
+          description: Health-check report
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HealthCheckReport' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/health-check/latest:
+    get:
+      tags: [Health check]
+      summary: Get the latest cached health-check report
+      description: 'Required scope: `btpc.viewer`. Returns null if no run has happened yet.'
+      responses:
+        '200':
+          description: Latest report (nullable)
+          content:
+            application/json:
+              schema:
+                allOf: [ { $ref: '#/components/schemas/HealthCheckReport' } ]
+                nullable: true
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ---------------------------------------------------------------- Certificates
+  /api/v1/certificates:
+    get:
+      tags: [Certificates]
+      summary: List stored credential certificates
+      description: 'Required scope: `btpc.viewer`.'
+      responses:
+        '200':
+          description: Certificate inventory
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/CertEntry' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ----------------------------------------------------------------- Audit sinks
+  /api/v1/audit-sinks:
+    get:
+      tags: [Audit sinks]
+      summary: List configured audit sinks
+      description: 'Required scope: `btpc.viewer`. Secrets are never returned (only `hasSecret`).'
+      responses:
+        '200':
+          description: Audit sinks
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/AuditSinkDto' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/audit-sinks/{kind}:
+    parameters:
+      - name: kind
+        in: path
+        required: true
+        description: Sink kind (e.g. splunk_hec, webhook)
+        schema: { type: string }
+    put:
+      tags: [Audit sinks]
+      summary: Create or update an audit sink
+      description: 'Required scope: `btpc.admin`.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AuditSinkUpsert' }
+      responses:
+        '200':
+          description: Saved sink
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuditSinkDto' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    delete:
+      tags: [Audit sinks]
+      summary: Delete an audit sink
+      description: 'Required scope: `btpc.admin`.'
+      responses:
+        '200': { description: Deleted }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/audit-sinks/{kind}/test:
+    parameters:
+      - name: kind
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      tags: [Audit sinks]
+      summary: Test an audit sink connection
+      description: 'Required scope: `btpc.admin`. Always returns 200; the `ok` flag reports success.'
+      responses:
+        '200':
+          description: Test result
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuditSinkTestResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+components:
+  securitySchemes:
+    xsuaa:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >
+        XSUAA-issued OAuth2 access token. Scopes (`btpc.admin`,
+        `btpc.responder`, `btpc.sod_viewer`, `btpc.viewer`) are carried as
+        `SCOPE_<name>` authorities and enforced per operation.
+
+  parameters:
+    IdPath:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    CallerSource:
+      name: X-Caller-Source
+      in: header
+      required: false
+      description: Audit attribution only; default UI.
+      schema:
+        type: string
+        enum: [soar, soar-api, system]
+
+  responses:
+    BadRequest:
+      description: Invalid input or malformed JSON body
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    Unauthorized:
+      description: Missing or invalid bearer token
+    Forbidden:
+      description: Authenticated but missing the required scope
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    Conflict:
+      description: State conflict or data-integrity violation
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    BadGateway:
+      description: Upstream BTP/CIS failure
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    ServerError:
+      description: Unhandled server error
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  schemas:
+    # ---- Error envelope (GlobalExceptionHandler / ErrorResponse) ----
+    ErrorResponse:
+      type: object
+      description: Uniform error envelope. `null` fields are omitted.
+      properties:
+        error:
+          type: string
+          description: Stable machine code.
+          enum: [bad_request, malformed_body, not_found, conflict, cis_upstream, forbidden, server_error]
+        message:
+          type: string
+          nullable: true
+        timestamp:
+          type: string
+          format: date-time
+
+    # ---- Platform ----
+    Health:
+      type: object
+      properties:
+        status: { type: string, example: ok }
+        version: { type: string }
+        profiles:
+          type: array
+          items: { type: string }
+        devAuthEnabled: { type: boolean }
+    WhoAmI:
+      type: object
+      properties:
+        authenticated: { type: boolean }
+        user: { type: string, nullable: true }
+        scopes:
+          type: array
+          items: { type: string }
+          description: Granted scopes with the SCOPE_ prefix stripped.
+
+    # ---- App config ----
+    AppConfigUpdate:
+      type: object
+      required: [value]
+      properties:
+        value: { type: string }
+    KeyState:
+      type: object
+      properties:
+        value: { type: string }
+        overridden:
+          type: boolean
+          description: True when an explicit override exists (vs. the default).
+
+    # ---- Subaccount request bodies ----
+    LabelPatch:
+      type: object
+      properties:
+        label: { type: string, nullable: true }
+    AttachCredential:
+      type: object
+      required: [serviceKey]
+      properties:
+        serviceKey:
+          type: string
+          description: Raw BTP service-key JSON (string).
+    SetCfOrgId:
+      type: object
+      properties:
+        cfOrgId: { type: string, format: uuid }
+    CopyCfTechUser:
+      type: object
+      properties:
+        cfApiUrl: { type: string }
+        cfUaaUrl: { type: string }
+    Stage:
+      type: string
+      description: Deployment stage. Validated case-insensitively against this set.
+      enum: [prod, dev, qa, test]
+      nullable: true
+    EnrollRequest:
+      type: object
+      description: >
+        SubaccountService.EnrollRequest. Carries the subaccount identity and the
+        service keys to wrap and store. Pasted IAS keys are ignored (manage IAS at
+        the tenant level instead).
+      required: [subaccountGuid]
+      properties:
+        subaccountGuid:
+          type: string
+          format: uuid
+          description: Required. Pick it from the Discover picker or type it manually.
+        cisDisplayName: { type: string, nullable: true, description: 'Falls back to the CIS key identity zone, else "Subaccount <guid>".' }
+        region: { type: string, nullable: true, description: 'Falls back to the CIS key region, else "unknown".' }
+        globalAccountId: { type: string, format: uuid, nullable: true }
+        globalAccountName: { type: string, nullable: true }
+        stage: { $ref: '#/components/schemas/Stage' }
+        label: { type: string, nullable: true }
+        serviceKeys:
+          type: array
+          description: Raw BTP service-key JSON documents (each a string). Classified on enroll.
+          items: { type: string }
+        discoveredId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Discovery candidate this enrollment was promoted from (audit only).
+    QuickAddRequest:
+      type: object
+      description: Manually register a subaccount with no central-viewer key. No credential is attached.
+      required: [subaccountGuid, cisDisplayName, region]
+      properties:
+        subaccountGuid: { type: string, format: uuid }
+        cisDisplayName: { type: string, description: Display name (the "name" field in the UI). }
+        region: { type: string }
+        globalAccountId: { type: string, format: uuid, nullable: true }
+        globalAccountName: { type: string, nullable: true }
+        stage: { $ref: '#/components/schemas/Stage' }
+        label: { type: string, nullable: true }
+    MetadataPatch:
+      type: object
+      description: Partial update of subaccount metadata. Omitted/blank fields are cleared to null.
+      properties:
+        label: { type: string, nullable: true }
+        globalAccountId: { type: string, format: uuid, nullable: true }
+        globalAccountName: { type: string, nullable: true }
+        stage: { $ref: '#/components/schemas/Stage' }
+    CfTechnicalUserPayload:
+      type: object
+      description: >
+        CF technical-user credential (IAS X.509 passcode flow). All fields are
+        required; the server runs a live `/v3/organizations` smoke test before
+        storing and rejects the credential if it fails.
+      required: [cfApiUrl, cfUaaUrl, username, origin, iasPasscodeUrl, p12Base64, p12Password]
+      properties:
+        cfApiUrl: { type: string, description: Cloud Controller API URL (allowlist-checked). }
+        cfUaaUrl: { type: string, description: UAA token URL (allowlist-checked). }
+        username: { type: string }
+        origin: { type: string, description: 'IAS origin key - what `cf login --origin <key>` uses (Trust Config → *-platform).' }
+        iasPasscodeUrl: { type: string, description: IAS passcode endpoint (allowlist-checked). }
+        p12Base64: { type: string, description: Base64-encoded PKCS#12 client cert. }
+        p12Password: { type: string }
+    SubaccountDto:
+      type: object
+      description: >
+        Enrolled subaccount projection (ninja.gruber.btpc.enroll.domain.SubaccountDto).
+        Null fields are omitted from the response.
+      properties:
+        id: { type: string, format: uuid }
+        subaccountGuid: { type: string, format: uuid }
+        cisDisplayName: { type: string }
+        cisDisplayNameRefreshedAt: { type: string, format: date-time, nullable: true }
+        label: { type: string, nullable: true }
+        region: { type: string }
+        globalAccountId: { type: string, format: uuid, nullable: true }
+        globalAccountName: { type: string, nullable: true }
+        stage: { type: string, nullable: true }
+        enrolledBy: { type: string }
+        enrolledAt: { type: string, format: date-time }
+        lastHealthAt: { type: string, format: date-time, nullable: true }
+        lastHealthError: { type: string, nullable: true }
+        status: { type: string, enum: [active, disabled, error] }
+        cfOrgId: { type: string, format: uuid, nullable: true }
+        capabilities: { $ref: '#/components/schemas/SubaccountCapabilities' }
+        contactCount: { type: integer }
+    SubaccountCapabilities:
+      type: object
+      description: Which credential kinds are attached to the subaccount.
+      properties:
+        cis: { type: boolean }
+        xsuaaApiaccess: { type: boolean }
+        cfTechnicalUser: { type: boolean }
+
+    # ---- Contacts ----
+    ContactPayload:
+      type: object
+      description: ContactService.ContactPayload.
+      required: [name, email, role]
+      properties:
+        name: { type: string }
+        email: { type: string }
+        role: { type: string, enum: [security, ops, business, technical, other] }
+        notes: { type: string, nullable: true }
+    SubaccountContact:
+      type: object
+      description: ninja.gruber.btpc.domain.SubaccountContact.
+      properties:
+        id: { type: string, format: uuid }
+        subaccountId: { type: string, format: uuid }
+        name: { type: string }
+        email: { type: string }
+        role: { type: string, enum: [security, ops, business, technical, other] }
+        notes: { type: string, nullable: true }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time, nullable: true }
+
+    # ---- IAS tenants ----
+    IasTenantCreatePayload:
+      type: object
+      description: >
+        IasTenantService.CreatePayload. Also used to replace credentials (PUT
+        .../credentials), in which case the URL host must match the existing tenant.
+      required: [displayName, url, p12Base64]
+      properties:
+        displayName: { type: string }
+        url: { type: string, description: IAS tenant URL; the host is derived and used as the unique key (allowlist-checked). }
+        p12Base64: { type: string, description: Base64-encoded PKCS#12 from the X509_GENERATED IAS application binding. }
+        p12Password: { type: string, nullable: true, description: Defaults to empty if omitted. }
+    IasTenantMeta:
+      type: object
+      properties:
+        displayName: { type: string }
+    IasTenantDto:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        displayName: { type: string, nullable: true }
+        iasHost: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        createdBy: { type: string, nullable: true }
+        updatedAt: { type: string, format: date-time, nullable: true }
+        updatedBy: { type: string, nullable: true }
+
+    # ---- Origin profiles / IdP discovery ----
+    OriginProfileBody:
+      type: object
+      required: [name, originKeys]
+      properties:
+        name: { type: string }
+        description: { type: string, nullable: true }
+        originKeys:
+          type: array
+          minItems: 1
+          items: { type: string }
+        subaccountIds:
+          type: array
+          items: { type: string, format: uuid }
+          description: Subaccounts to validate the origin keys against.
+    OriginProfile:
+      type: object
+      description: ninja.gruber.btpc.origin.domain.OriginProfile.
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string, nullable: true }
+        originKeys:
+          type: array
+          items: { type: string }
+        createdAt: { type: string, format: date-time }
+        createdBy: { type: string }
+        updatedAt: { type: string, format: date-time, nullable: true }
+        updatedBy: { type: string, nullable: true }
+    IdpDiscoverResult:
+      type: object
+      description: IdentityProviderService.DiscoverResult - discovered origins plus per-subaccount errors.
+      properties:
+        origins:
+          type: array
+          items: { $ref: '#/components/schemas/IdpAggregate' }
+        errors:
+          type: array
+          items: { $ref: '#/components/schemas/IdpDiscoverError' }
+    IdpAggregate:
+      type: object
+      description: One identity provider origin, aggregated across the subaccounts it was seen in.
+      properties:
+        originKey: { type: string }
+        name: { type: string, nullable: true }
+        type: { type: string, nullable: true }
+        active: { type: boolean, nullable: true }
+        seenIn:
+          type: array
+          description: Display names of the subaccounts where this origin was found.
+          items: { type: string }
+    IdpDiscoverError:
+      type: object
+      properties:
+        subaccountId: { type: string, format: uuid }
+        subaccountDisplayName: { type: string }
+        error: { type: string }
+
+    # ---- Discovery ----
+    CentralKeySaveRequest:
+      type: object
+      description: CentralKeyService.SaveRequest. The service key must classify as a CIS central-viewer key.
+      required: [serviceKey]
+      properties:
+        serviceKey: { type: string, description: Raw CIS central-viewer service-key JSON (string). }
+        label: { type: string, nullable: true }
+        globalAccountName: { type: string, nullable: true }
+        syncIntervalMinutes: { type: integer, default: 60 }
+        syncEnabled: { type: boolean, default: true }
+    CentralKeyUpdateRequest:
+      type: object
+      description: CentralKeyService.UpdateRequest. Partial - only sync settings and label.
+      properties:
+        syncEnabled: { type: boolean, nullable: true }
+        syncIntervalMinutes: { type: integer, nullable: true }
+        label: { type: string, nullable: true }
+    CentralViewerKey:
+      type: object
+      description: ninja.gruber.btpc.discovery.domain.CentralViewerKey. The encrypted key material is never returned.
+      properties:
+        id: { type: string, format: uuid }
+        globalAccountId: { type: string, format: uuid, nullable: true }
+        globalAccountName: { type: string, nullable: true }
+        label: { type: string, nullable: true }
+        keyVersion: { type: integer }
+        syncEnabled: { type: boolean }
+        syncIntervalMinutes: { type: integer }
+        lastSyncAt: { type: string, format: date-time, nullable: true }
+        lastSyncError: { type: string, nullable: true }
+        lastSyncCount: { type: integer, nullable: true }
+        addedBy: { type: string }
+        addedAt: { type: string, format: date-time }
+    SyncResult:
+      type: object
+      description: DiscoveryService.SyncResult.
+      properties:
+        centralKeyId: { type: string, format: uuid }
+        ok: { type: boolean }
+        upserts: { type: integer, description: Number of candidate rows inserted/updated. }
+        error: { type: string, nullable: true }
+    DiscoveredSubaccount:
+      type: object
+      description: ninja.gruber.btpc.discovery.domain.DiscoveredSubaccount.
+      properties:
+        id: { type: string, format: uuid }
+        centralKeyId: { type: string, format: uuid }
+        subaccountGuid: { type: string, format: uuid }
+        displayName: { type: string, nullable: true }
+        subdomain: { type: string, nullable: true }
+        region: { type: string, nullable: true }
+        parentType: { type: string, nullable: true }
+        parentGuid: { type: string, format: uuid, nullable: true }
+        globalAccountGuid: { type: string, format: uuid, nullable: true }
+        state: { type: string, nullable: true }
+        stateMessage: { type: string, nullable: true }
+        betaEnabled: { type: boolean, nullable: true }
+        usedForProduction: { type: string, nullable: true }
+        description: { type: string, nullable: true }
+        discoveredAt: { type: string, format: date-time }
+        lastSeenAt: { type: string, format: date-time, nullable: true }
+        enrolledSubaccountId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Set when this candidate is already enrolled; null means promotable.
+
+    # ---- CIS ----
+    CisDiscoverRequest:
+      type: object
+      required: [serviceKey]
+      properties:
+        serviceKey:
+          type: string
+          description: Raw CIS central-viewer service-key JSON (string).
+    CisDiscoverResponse:
+      type: object
+      properties:
+        count: { type: integer }
+        subaccounts:
+          type: array
+          items: { $ref: '#/components/schemas/SubaccountCandidate' }
+    SubaccountCandidate:
+      type: object
+      description: ninja.gruber.btpc.cis.domain.SubaccountCandidate (live CIS projection; not yet persisted).
+      properties:
+        guid: { type: string, format: uuid }
+        displayName: { type: string, nullable: true }
+        subdomain: { type: string, nullable: true }
+        region: { type: string, nullable: true }
+        parentType: { type: string, nullable: true }
+        parentGuid: { type: string, nullable: true }
+        globalAccountGuid: { type: string, nullable: true }
+        betaEnabled: { type: boolean, nullable: true }
+        description: { type: string, nullable: true }
+        state: { type: string, nullable: true }
+        stateMessage: { type: string, nullable: true }
+        usedForProduction: { type: string, nullable: true }
+
+    # ---- Containment ----
+    ContainRequest:
+      type: object
+      description: ContainmentDtos.ContainRequest.
+      required: [actions, userEmail]
+      properties:
+        actions:
+          type: array
+          minItems: 1
+          description: >
+            Required, non-empty. Per-subaccount actions: `xsuaa_strip_roles`,
+            `xsuaa_delete_shadow`, `cf_revoke_org_roles`. Per-IAS-tenant actions:
+            `ias_deactivate`, `ias_strip_groups`.
+          items:
+            type: string
+            enum: [xsuaa_strip_roles, xsuaa_delete_shadow, cf_revoke_org_roles, ias_deactivate, ias_strip_groups]
+        userEmail: { type: string }
+        subaccountIds:
+          type: array
+          nullable: true
+          description: Null/empty → all enrolled subaccounts (only used if a per-SA action is requested).
+          items: { type: string, format: uuid }
+        iasTenantIds:
+          type: array
+          nullable: true
+          description: Null/empty → all enrolled IAS tenants (only used if an IAS action is requested).
+          items: { type: string, format: uuid }
+        originMode: { type: string, enum: [all, list, discovered], description: How to resolve which XSUAA origins to act on. }
+        origins:
+          type: array
+          nullable: true
+          description: Explicit origin keys; used when originMode = list.
+          items: { type: string }
+        dryRun: { type: boolean, default: true, description: Defaults to true - plan only, no mutation.}
+        comment: { type: string, nullable: true }
+    ActionResult:
+      type: object
+      description: Outcome of one containment/unlock action against one system.
+      properties:
+        action: { type: string }
+        outcome: { type: string, description: 'Lower-kebab outcome, e.g. ok, failed, skipped, dry-run.' }
+        message: { type: string, nullable: true }
+        snapshotId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Snapshot captured for later unlock/restore, when applicable.
+    SubaccountActionResult:
+      type: object
+      description: Per-subaccount slice of a containment/unlock result.
+      properties:
+        subaccountId: { type: string, format: uuid }
+        displayName: { type: string }
+        blockedByProtection: { type: boolean }
+        results:
+          type: array
+          items: { $ref: '#/components/schemas/ActionResult' }
+        protectionReasons:
+          type: array
+          items: { type: string }
+    ContainmentResult:
+      type: object
+      description: ContainmentDtos.ContainmentResult.
+      properties:
+        correlationId: { type: string, format: uuid }
+        dryRun: { type: boolean }
+        resolvedIasTenantIds:
+          type: array
+          items: { type: string, format: uuid }
+        iasResults:
+          type: array
+          description: One entry per selected IAS tenant.
+          items: { $ref: '#/components/schemas/ActionResult' }
+        perSubaccount:
+          type: array
+          items: { $ref: '#/components/schemas/SubaccountActionResult' }
+        globalProtectionReasons:
+          type: array
+          nullable: true
+          description: >
+            Non-empty → the request was hard-blocked by a global protection;
+            iasResults and perSubaccount are then empty.
+          items: { type: string }
+    UnlockRequest:
+      type: object
+      description: ContainmentDtos.UnlockRequest.
+      required: [actions, userEmail]
+      properties:
+        actions:
+          type: array
+          minItems: 1
+          description: >
+            Required, non-empty. Per-subaccount actions: `xsuaa_restore_roles`,
+            `cf_restore_org_roles`. Per-IAS-tenant actions: `ias_activate`,
+            `ias_restore_groups`.
+          items:
+            type: string
+            enum: [xsuaa_restore_roles, cf_restore_org_roles, ias_activate, ias_restore_groups]
+        userEmail: { type: string }
+        subaccountIds:
+          type: array
+          nullable: true
+          items: { type: string, format: uuid }
+        iasTenantIds:
+          type: array
+          nullable: true
+          items: { type: string, format: uuid }
+        correlationId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Containment run to restore from; null restores the latest snapshot per target.
+        dryRun: { type: boolean, default: true }
+        comment: { type: string, nullable: true }
+    UnlockResult:
+      type: object
+      description: ContainmentDtos.UnlockResult.
+      properties:
+        correlationId: { type: string, format: uuid }
+        dryRun: { type: boolean }
+        resolvedIasTenantIds:
+          type: array
+          items: { type: string, format: uuid }
+        iasResults:
+          type: array
+          items: { $ref: '#/components/schemas/ActionResult' }
+        perSubaccount:
+          type: array
+          items: { $ref: '#/components/schemas/SubaccountActionResult' }
+    UnlockPreviewEntry:
+      type: object
+      description: ContainmentDtos.UnlockPreviewEntry - what a restore would re-grant in one subaccount.
+      properties:
+        subaccountId: { type: string, format: uuid }
+        displayName: { type: string }
+        snapshotId: { type: string, format: uuid }
+        perOrigin:
+          type: array
+          items: { $ref: '#/components/schemas/UnlockPreviewOrigin' }
+        totalRoles: { type: integer }
+        note: { type: string, nullable: true }
+    UnlockPreviewOrigin:
+      type: object
+      properties:
+        origin: { type: string }
+        roleCollections:
+          type: array
+          items: { type: string }
+
+    # ---- Protected users ----
+    AddProtectedUser:
+      type: object
+      properties:
+        subaccountId: { type: string, format: uuid, nullable: true }
+        iasTenantId: { type: string, format: uuid, nullable: true }
+        userEmail: { type: string }
+        reason: { type: string, nullable: true }
+        origin:
+          type: string
+          nullable: true
+          description: Protected-user origin (db value).
+        expiresAt: { type: string, format: date-time, nullable: true }
+    ProtectedUserDto:
+      type: object
+      description: ninja.gruber.btpc.protect.domain.ProtectedUserDto. Null fields are omitted.
+      properties:
+        id: { type: string, format: uuid }
+        subaccountId: { type: string, format: uuid, nullable: true, description: Set for a subaccount-scoped entry. }
+        iasTenantId: { type: string, format: uuid, nullable: true, description: Set for an IAS-tenant-scoped entry. }
+        userEmail: { type: string }
+        reason: { type: string, nullable: true }
+        origin: { type: string, nullable: true }
+        addedBy: { type: string }
+        addedAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time, nullable: true }
+        enabled: { type: boolean }
+        disabledAt: { type: string, format: date-time, nullable: true }
+        disabledBy: { type: string, nullable: true }
+        isGlobal: { type: boolean, description: True when neither subaccountId nor iasTenantId is set (applies everywhere). }
+        isSubaccount: { type: boolean }
+        isIasTenant: { type: boolean }
+    ProtectedUserCheck:
+      type: object
+      properties:
+        isProtected: { type: boolean }
+        matches:
+          type: array
+          items: { $ref: '#/components/schemas/ProtectedUserDto' }
+
+    # ---- SoD ----
+    ConflictSetPayload:
+      type: object
+      description: >
+        ConflictSetService.Payload. Per-kind shape rules apply: `sod` needs ≥2
+        role collections, `critical` ≥1, `threshold` needs thresholdCount ≥1,
+        `external_email` uses roleCollections as the allowed-domain list.
+      required: [name, severity]
+      properties:
+        name: { type: string }
+        description: { type: string, nullable: true }
+        severity: { type: string, enum: [low, medium, high, critical] }
+        kind: { type: string, enum: [sod, critical, threshold, external_email], default: sod }
+        roleCollections:
+          type: array
+          items: { type: string }
+        thresholdCount: { type: integer, nullable: true, description: Only meaningful when kind = threshold. }
+        scopeLevel: { type: string, enum: [subaccount, space, org, global], default: subaccount }
+    ConflictSet:
+      type: object
+      description: ninja.gruber.btpc.domain.ConflictSet.
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string, nullable: true }
+        severity: { type: string, enum: [low, medium, high, critical] }
+        kind: { type: string, enum: [sod, critical, threshold, external_email] }
+        roleCollections:
+          type: array
+          items: { type: string }
+        thresholdCount: { type: integer, nullable: true }
+        enabled: { type: boolean }
+        scopeLevel: { type: string, enum: [subaccount, space, org, global] }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time, nullable: true }
+    EnabledPatch:
+      type: object
+      required: [enabled]
+      properties:
+        enabled: { type: boolean }
+    ScanRequest:
+      type: object
+      required: [subaccountId]
+      properties:
+        subaccountId: { type: string, format: uuid }
+    ScanResult:
+      type: object
+      description: SodEngine.ScanResult.
+      properties:
+        correlationId: { type: string, format: uuid }
+        subaccountDisplayName: { type: string }
+        usersScanned: { type: integer }
+        conflictSetCount: { type: integer }
+        findings:
+          type: array
+          items: { $ref: '#/components/schemas/SodFinding' }
+        message: { type: string, nullable: true, description: 'Set when the scan was a no-op (e.g. no enabled conflict sets).' }
+    SodFinding:
+      type: object
+      description: SodEngine.Finding.
+      properties:
+        conflictSetId: { type: string, format: uuid }
+        conflictSetName: { type: string }
+        severity: { type: string, enum: [low, medium, high, critical] }
+        kind: { type: string, enum: [sod, critical, threshold, external_email] }
+        userEmail: { type: string }
+        userIasId: { type: string, nullable: true }
+        origin: { type: string, nullable: true }
+        scopeContext: { type: string, description: '"subaccount", "org:NAME", or "space:ORG/SPACE".' }
+        matchedRoleCollections:
+          type: array
+          items: { type: string }
+
+    # ---- User analysis ----
+    AnalysisReport:
+      type: object
+      description: UserAnalysisService.AnalysisReport - a user's footprint across IAS tenants and subaccounts.
+      properties:
+        email: { type: string }
+        iasTenants:
+          type: array
+          items: { $ref: '#/components/schemas/AnalysisTenantSection' }
+        subaccounts:
+          type: array
+          items: { $ref: '#/components/schemas/AnalysisSubaccountSection' }
+    AnalysisTenantSection:
+      type: object
+      properties:
+        iasTenantId: { type: string, format: uuid }
+        displayName: { type: string, nullable: true }
+        iasHost: { type: string, nullable: true }
+        userFound: { type: boolean }
+        iasUserId: { type: string, nullable: true }
+        iasUserActive: { type: boolean, nullable: true }
+        givenName: { type: string, nullable: true }
+        familyName: { type: string, nullable: true }
+        iasGroups:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              displayName: { type: string, nullable: true }
+        error: { type: string, nullable: true }
+    AnalysisSubaccountSection:
+      type: object
+      properties:
+        subaccountId: { type: string, format: uuid }
+        displayName: { type: string }
+        region: { type: string, nullable: true }
+        shadowUsers:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              origin: { type: string, nullable: true }
+        directRcs:
+          type: array
+          description: Role collections granted directly to the shadow user.
+          items:
+            type: object
+            properties:
+              roleCollection: { type: string }
+              origin: { type: string, nullable: true }
+        mappedRcs:
+          type: array
+          description: Role collections derived via IAS-group → role-collection mappings.
+          items:
+            type: object
+            properties:
+              roleCollection: { type: string }
+              origin: { type: string, nullable: true }
+              viaIasGroup: { type: string, nullable: true }
+        cfUserGuid: { type: string, nullable: true }
+        cfUserOrigin: { type: string, nullable: true }
+        cfRoles:
+          type: array
+          items:
+            type: object
+            properties:
+              type: { type: string }
+              orgGuid: { type: string, nullable: true }
+              spaceGuid: { type: string, nullable: true }
+              spaceName: { type: string, nullable: true }
+        errors:
+          type: array
+          items: { type: string }
+
+    # ---- Health check ----
+    HealthCheckReport:
+      type: object
+      description: HealthCheckService.Report - per-credential token-probe matrix.
+      properties:
+        correlationId: { type: string, format: uuid }
+        startedAt: { type: string, format: date-time }
+        finishedAt: { type: string, format: date-time }
+        perSubaccount:
+          type: array
+          items:
+            type: object
+            properties:
+              subaccountId: { type: string, format: uuid }
+              displayName: { type: string }
+              probes:
+                type: array
+                items: { $ref: '#/components/schemas/ProbeResult' }
+        perTenant:
+          type: array
+          items:
+            type: object
+            properties:
+              tenantId: { type: string, format: uuid }
+              displayName: { type: string, nullable: true }
+              iasHost: { type: string, nullable: true }
+              probe: { $ref: '#/components/schemas/ProbeResult' }
+        perCentralKey:
+          type: array
+          items:
+            type: object
+            properties:
+              centralKeyId: { type: string, format: uuid }
+              label: { type: string, nullable: true }
+              globalAccountName: { type: string, nullable: true }
+              probe: { $ref: '#/components/schemas/ProbeResult' }
+        totalProbes: { type: integer }
+        okProbes: { type: integer }
+    ProbeResult:
+      type: object
+      properties:
+        kind: { type: string, description: 'e.g. xsuaa_apiaccess, cf_technical_user, ias, cis_central.' }
+        outcome: { type: string, enum: [ok, failed, skipped] }
+        message: { type: string, nullable: true }
+        latencyMs: { type: integer, format: int64 }
+
+    # ---- Certificates ----
+    CertEntry:
+      type: object
+      description: CertificateInventoryService.CertEntry - one stored credential's leaf X.509.
+      properties:
+        source: { type: string, enum: [ias, cf] }
+        system_id: { type: string, description: IAS tenant id or subaccount id, depending on source. }
+        label: { type: string, nullable: true }
+        sublabel: { type: string, nullable: true, description: IAS host for ias entries; empty/null for cf. }
+        subject: { type: string, nullable: true }
+        notBefore: { type: string, nullable: true, description: ISO-8601 instant. }
+        notAfter: { type: string, nullable: true, description: ISO-8601 instant. }
+        daysUntilExpiry: { type: integer, format: int64, nullable: true }
+        status: { type: string, enum: [ok, expiring, expired, failed], description: 'expiring = within 30 days; failed = could not parse.' }
+        error: { type: string, nullable: true }
+
+    # ---- Audit sinks ----
+    AuditSinkUpsert:
+      type: object
+      properties:
+        enabled: { type: boolean }
+        config:
+          type: object
+          description: Sink-specific config (JSON).
+          additionalProperties: true
+        secret:
+          type: string
+          nullable: true
+          description: Write-only secret; never returned on read.
+    AuditSinkDto:
+      type: object
+      properties:
+        kind: { type: string }
+        enabled: { type: boolean }
+        config:
+          type: object
+          additionalProperties: true
+        hasSecret: { type: boolean }
+        lastTestAt: { type: string, format: date-time, nullable: true }
+        lastTestStatus: { type: string, nullable: true }
+        lastTestMessage: { type: string, nullable: true }
+        updatedAt: { type: string, format: date-time, nullable: true }
+        updatedBy: { type: string, nullable: true }
+    AuditSinkTestResult:
+      type: object
+      properties:
+        ok: { type: boolean }
+        message: { type: string, nullable: true }

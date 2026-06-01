@@ -1,0 +1,162 @@
+<!--
+  SPDX-License-Identifier: AGPL-3.0-only
+  Copyright 2026 Jan-Luca Gruber
+-->
+<core:FragmentDefinition
+    xmlns="sap.m"
+    xmlns:l="sap.ui.layout"
+    xmlns:core="sap.ui.core">
+
+    <Dialog title="{i18n>dlgEditTitle}" contentWidth="50rem" stretchOnPhone="true">
+        <content>
+            <l:VerticalLayout width="100%" class="sapUiContentPadding">
+
+                <ObjectHeader title="{edit>/cisDisplayName}" responsive="false">
+                    <attributes>
+                        <ObjectAttribute title="GUID" text="{edit>/subaccountGuid}"/>
+                        <ObjectAttribute title="Region" text="{edit>/region}"/>
+                    </attributes>
+                </ObjectHeader>
+
+                <!-- Metadata -->
+                <Title text="Metadata" level="H3" class="sapUiSmallMarginTop"/>
+                <l:HorizontalLayout allowWrapping="true">
+                    <l:VerticalLayout>
+                        <Label text="{i18n>lblLabel}"/>
+                        <Input value="{edit>/label}" placeholder="{i18n>lblLabelHint}" width="14rem"/>
+                    </l:VerticalLayout>
+                    <l:VerticalLayout class="sapUiSmallMarginBegin">
+                        <Label text="{i18n>lblGaName}"/>
+                        <Input value="{edit>/globalAccountName}" placeholder="{i18n>lblGaNameHint}" width="14rem"/>
+                    </l:VerticalLayout>
+                    <l:VerticalLayout class="sapUiSmallMarginBegin">
+                        <Label text="{i18n>lblGaId}"/>
+                        <Input value="{edit>/globalAccountId}" placeholder="{i18n>lblGaIdHint}" width="22rem"/>
+                    </l:VerticalLayout>
+                    <l:VerticalLayout class="sapUiSmallMarginBegin">
+                        <Label text="{i18n>lblStage}"/>
+                        <Select selectedKey="{edit>/stage}" width="10rem" forceSelection="false">
+                            <core:Item key=""     text="(none)"/>
+                            <core:Item key="prod" text="prod"/>
+                            <core:Item key="dev"  text="dev"/>
+                            <core:Item key="qa"   text="qa"/>
+                            <core:Item key="test" text="test"/>
+                        </Select>
+                    </l:VerticalLayout>
+                </l:HorizontalLayout>
+                <HBox class="sapUiSmallMarginTop">
+                    <Button text="Save metadata" press=".onSaveMetadata" type="Emphasized"/>
+                </HBox>
+
+                <!-- Capabilities (only the per-subaccount ones that gate
+                     containment mutations; the legacy CIS slot is gone since
+                     discovery is now per-global-account, not per-subaccount). -->
+                <Title text="{i18n>sectionCapabilities}" level="H3" class="sapUiSmallMarginTop"/>
+                <HBox>
+                    <ObjectStatus text="XSUAA"
+                                  state="{= ${edit>/capabilities/xsuaaApiaccess} ? 'Success' : 'Warning'}"
+                                  icon="{= ${edit>/capabilities/xsuaaApiaccess} ? 'sap-icon://accept' : 'sap-icon://decline'}"
+                                  class="sapUiSmallMarginEnd"/>
+                    <ObjectStatus text="CF"
+                                  state="{= ${edit>/capabilities/cfTechnicalUser} ? 'Success' : 'Warning'}"
+                                  icon="{= ${edit>/capabilities/cfTechnicalUser} ? 'sap-icon://accept' : 'sap-icon://decline'}"/>
+                </HBox>
+
+                <!-- Attach XSUAA api-access service key. CIS is captured at
+                     enroll-time only and rejected here on purpose. IAS + CF
+                     technical user are below via their structured dialogs. -->
+                <Title text="{i18n>sectionAttachKey}" level="H3" class="sapUiSmallMarginTop"/>
+                <Text text="{i18n>sectionAttachKeyHint}"/>
+                <TextArea value="{edit>/newKey}" rows="5" width="100%"
+                          placeholder="{i18n>phAttachKey}"
+                          liveChange=".onEditNewKeyChange"/>
+                <HBox class="sapUiSmallMarginTop">
+                    <Text text="{edit>/newKeyValidation}"/>
+                    <ToolbarSpacer/>
+                    <Button text="{i18n>btnAttach}" press=".onAttachKey" type="Emphasized"
+                            enabled="{= !!${edit>/newKey} &amp;&amp; ${edit>/newKeyValid} }"/>
+                </HBox>
+
+                <!-- Auto-provision XSUAA api-access via the attached CF
+                     technical user. Server-side flow: scan + create instance
+                     + create/reuse key + store credentials. Only enabled when
+                     a CF tech user is attached AND the cf_org_id is pinned. -->
+                <HBox class="sapUiSmallMarginTop" alignItems="Center">
+                    <Text text="{i18n>autoProvisionXsuaaHint}"/>
+                    <ToolbarSpacer/>
+                    <Button text="{i18n>autoProvisionXsuaaBtn}"
+                            icon="sap-icon://activate"
+                            press=".onAutoProvisionXsuaa"
+                            enabled="{= !!${edit>/capabilities/cfTechnicalUser} &amp;&amp; !!${edit>/cfOrgId} }"
+                            busy="{edit>/autoProvisionBusy}"/>
+                </HBox>
+
+                <!-- CF Cloud Controller org pin. cf_revoke_org_roles needs this
+                     to target the correct org rather than fanning out to every
+                     org the technical user can see (which is wider than this
+                     subaccount when the technical user is reused). -->
+                <Title text="{i18n>sectionCfOrgId}" level="H3" class="sapUiSmallMarginTop"/>
+                <Text text="{i18n>sectionCfOrgIdHint}"/>
+                <HBox class="sapUiSmallMarginTop">
+                    <Input value="{edit>/cfOrgId}"
+                           width="24rem"
+                           placeholder="00000000-0000-0000-0000-000000000000"/>
+                    <Button text="{i18n>btnSave}" type="Emphasized"
+                            class="sapUiTinyMarginBegin"
+                            press=".onSaveCfOrgId"/>
+                </HBox>
+
+                <!-- CF technical user (separate flow - structured fields, not a JSON paste) -->
+                <Title text="{i18n>sectionAttachCfTechUser}" level="H3" class="sapUiSmallMarginTop"/>
+                <Text text="{i18n>sectionAttachCfTechUserHint}"/>
+                <Button text="{i18n>btnAddCfTechUser}" icon="sap-icon://shield"
+                        press=".onOpenAddCfTechUser"
+                        class="sapUiSmallMarginTop"/>
+
+                <!-- Contacts -->
+                <Title text="{i18n>sectionContacts}" level="H3" class="sapUiSmallMarginTop"/>
+                <Table items="{edit>/contacts}" noDataText="No contacts yet - incident comms will have no addressee.">
+                    <columns>
+                        <Column><Text text="Role"/></Column>
+                        <Column><Text text="Name"/></Column>
+                        <Column><Text text="Email"/></Column>
+                        <Column><Text text="Notes"/></Column>
+                        <Column hAlign="End"><Text text="Actions"/></Column>
+                    </columns>
+                    <items>
+                        <ColumnListItem>
+                            <cells>
+                                <ObjectStatus text="{edit>role}" state="Information"/>
+                                <Text text="{edit>name}"/>
+                                <Text text="{edit>email}"/>
+                                <Text text="{edit>notes}"/>
+                                <Button icon="sap-icon://delete" type="Transparent" press=".onDeleteContact"/>
+                            </cells>
+                        </ColumnListItem>
+                    </items>
+                </Table>
+
+                <Panel headerText="Add contact" expandable="true" expanded="false" class="sapUiSmallMarginTop">
+                    <l:VerticalLayout width="100%" class="sapUiContentPadding">
+                        <Input value="{edit>/newContact/name}" placeholder="{i18n>phContactName}"/>
+                        <Input value="{edit>/newContact/email}" placeholder="{i18n>phContactEmail}" class="sapUiTinyMarginTop"/>
+                        <Select selectedKey="{edit>/newContact/role}" class="sapUiTinyMarginTop">
+                            <items>
+                                <core:Item key="security" text="{i18n>roleSecurity}"/>
+                                <core:Item key="ops" text="{i18n>roleOps}"/>
+                                <core:Item key="business" text="{i18n>roleBusiness}"/>
+                                <core:Item key="technical" text="{i18n>roleTechnical}"/>
+                                <core:Item key="other" text="{i18n>roleOther}"/>
+                            </items>
+                        </Select>
+                        <Input value="{edit>/newContact/notes}" placeholder="{i18n>phContactNotes}" class="sapUiTinyMarginTop"/>
+                        <Button text="{i18n>btnAddContact}" press=".onAddContact" type="Emphasized" class="sapUiTinyMarginTop"/>
+                    </l:VerticalLayout>
+                </Panel>
+            </l:VerticalLayout>
+        </content>
+        <buttons>
+            <Button text="{i18n>btnClose}" press=".onCloseEdit"/>
+        </buttons>
+    </Dialog>
+</core:FragmentDefinition>
